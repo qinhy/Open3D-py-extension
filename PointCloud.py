@@ -196,7 +196,7 @@ class PointCloudBase:
             cent = np.asarray([p.get_center() for p in geos]).mean(0)
             for p in geos:
                 p.translate(cent)
-        o3d.visualization.draw([o3d.geometry.TriangleMesh.create_coordinate_frame()]+geos,point_size=1)
+        o3d.visualization.draw([o3d.geometry.TriangleMesh.create_coordinate_frame()]+geos,point_size=point_size)
         return self
     
 class PointCloudSelections(PointCloudBase):
@@ -705,15 +705,15 @@ class PointCloud(PointCloudUtility):
             height,width = img.shape[:2]
             resolution_mat = np.eye(4)*resolution
             resolution_mat[-1,-1] = 1
-            img2real = np.asarray( [[ 1.    ,  0.    ,  0.    ,  0],
-                                    [ 0.    ,  -1.   ,  0.    ,  height*resolution],
-                                    [ 0.    ,  0.    ,  1.    ,  0.    ],
-                                    [ 0.    ,  0.    ,  0.    ,  1.    ]])@resolution_mat
+            img2real = np.asarray( [[ 1. ,  0. ,  0. ,  0],
+                                    [ 0. ,  -1.,  0. ,  height*resolution],
+                                    [ 0. ,  0. ,  1. ,  0.    ],
+                                    [ 0. ,  0. ,  0. ,  1.    ]])@resolution_mat
             if y_as_z:
-                img2real = np.asarray([[ 1.    ,  0.    ,  0.    ,  0],
-                                        [ 0.    ,  0.    ,  1.    ,  0],
-                                        [ 0.    ,  1.    ,  0.    ,  0],
-                                        [ 0.    ,  0.    ,  0.    ,  1]])@img2real
+                img2real = np.asarray([ [ 1. ,  0. ,  0. ,  0],
+                                        [ 0. ,  0. ,  1. ,  0],
+                                        [ 0. ,  1. ,  0. ,  0],
+                                        [ 0. ,  0. ,  0. ,  1]])@img2real
             img = img[:,:,::-1].astype(float)/255.0
             pointsx,pointsy,pointsz = np.meshgrid(np.arange(0,width,sampling_step),
                                                   np.arange(0,height,sampling_step),[0])
@@ -857,4 +857,7 @@ class PointCloud(PointCloudUtility):
         pcds.append(outlier_cloud)
         aabbs.append(pcds[-1].get_aabb())
         return planes,pcds,aabbs
-    
+
+
+
+
