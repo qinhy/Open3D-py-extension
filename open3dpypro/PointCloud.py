@@ -231,7 +231,7 @@ class PointCloudSelections(PointCloudBase):
     def select_by_bool(self, bools: np.ndarray, invert: bool = False):
         return self._select_by_idx(self._bool2index(bools),invert=invert)
     
-    def get_index_by_normals(self, comfunc=lambda ns: np.ones(len(ns),dtype=bool), invert: bool = False) -> np.ndarray:
+    def get_index_by_normals(self, comfunc: Callable[[np.ndarray], np.ndarray] = lambda ns: np.ones(len(ns),dtype=bool), invert: bool = False) -> np.ndarray:
         if not self.has_normals():self.estimate_normals()
         return self._bool2index(comfunc(self.get_normals()),invert=invert)
         
@@ -312,6 +312,7 @@ class PointCloudSelections(PointCloudBase):
         return self._select_by_idx(np.arange(self.size())[:n])
 
 class PointCloudUtility(PointCloudSelections):
+    
     def create_from_sphere(self,r=1.0,cent=[0,0,0],number_of_points=10000):
         pcd = o3d.geometry.TriangleMesh.create_sphere(r
                 ).sample_points_uniformly(number_of_points=number_of_points, use_triangle_normal=False)
@@ -389,10 +390,8 @@ class PointCloudUtility(PointCloudSelections):
 
         return pcdres
     
-    def append_pcd(self, pcd: o3d.geometry.PointCloud):
-        self.pcd = self.merge_pcds([self,pcd])
-        # self.init()
-        return self
+    def append_pcd(self, pcd, rgb: bool = False, intensity: bool = False, normals: bool = False, labels: bool = False):
+        return self.merge_pcds([self,pcd], rgb=rgb, intensity=intensity, normals=normals, labels=labels)
     
     def distance2plane(self, plane: np.ndarray) -> np.ndarray:
         a,b,c,d = plane
@@ -427,6 +426,8 @@ class PointCloudUtility(PointCloudSelections):
         return a, b, c, d
     
 class PointCloudAdvanceIO(PointCloudUtility):
+
+    ############################# PIL part ######################################    
     try:
         from PIL import Image
         def _open_img(self, path: str):
@@ -489,7 +490,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
     except Exception as e:
         print(e,'no PIL, can not do save as img func of [save_png , save_jpg , save_tiff]')
 
-    
+    ############################# laspy part ######################################    
     try :
         import laspy
         def get_lasdata(self, h: laspy.LasHeader, pr: laspy.PackedPointRecord = None, pt_src_id: bool = False):
@@ -561,7 +562,6 @@ class PointCloudAdvanceIO(PointCloudUtility):
             las.write(path)
     except Exception as e:
         print(e,'can not do laspy IO!')
-
 
     ############################# pye57 part ######################################
     try:
@@ -781,7 +781,7 @@ class PointCloud(PointCloudAdvanceIO):
 
     def to_2D_Img(self, resolution: float = 0.05, color: bool = False) -> np.ndarray:
         usecolor = False
-        if color and len(self.pcd.colors)>0:
+        if color and self.has_colors():
             usecolor = True
         if color and not usecolor:
             print('has no rgb data, cannot use color!')
