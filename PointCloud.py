@@ -50,7 +50,6 @@ class PointCloudBase:
         self.pcd_tree = None
         self.get_center = self.pcd.get_center
         self.has_colors = self.pcd.has_colors
-        self.has_normals = self.pcd.has_normals
         self.has_points = self.pcd.has_points
         self.is_empty = self.pcd.is_empty
         self.rotate = self.pcd.rotate
@@ -73,18 +72,25 @@ class PointCloudBase:
 
     def translate(self, t: np.ndarray):
         self.pcd.translate(t)
-        return self           
-        
-    def has_rgb(self):
+        return self                   
+                  
+    def estimate_normals(self, param=o3d.geometry.KDTreeSearchParamKNN(30)):
+        self.pcd.estimate_normals(param)
+        return self
+    
+    def has_rgb(self) -> bool:
         return self.has_points() and self.size() == len(self.pcd.colors)
+    
+    def has_normals(self) -> bool:
+        return self.has_points() and self.pcd.has_normals() and self.size() == len(self.pcd.normals)
 
-    def has_intensity(self):
+    def has_intensity(self) -> bool:
         return self.has_points() and self.size() == len(self.intensity)
 
-    def has_labels(self):
+    def has_labels(self) -> bool:
         return self.has_points() and self.size() == len(self.labels)
     
-    def has_col_row(self):
+    def has_col_row(self) -> bool:
         return self.has_points() and self.size() == len(self.column_index) == len(self.row_index)
     
     def set_rgb(self, colors: np.ndarray):
@@ -201,9 +207,6 @@ class PointCloudSelections(PointCloudBase):
             res.labels = self.labels[idx].copy()
         return res
     
-    def select_by_bool(self, indices: np.ndarray, invert: bool = False):
-        return self._select_by_idx(np.arange(self.size())[indices],invert=invert)
-    
     def select_by_box(self, center, x_direction, y_direction, z_direction, invert: bool = False):
         # Normalize direction vectors and calculate squared norms (for half-lengths of the box sides)
         x_direction = np.asarray(x_direction)
@@ -237,56 +240,49 @@ class PointCloudSelections(PointCloudBase):
 
         return selected_pcd
     
-    def _bool2index(self, bools: np.ndarray, invert: bool = False):
+    def _bool2index(self, bools: np.ndarray, invert: bool = False) -> np.ndarray:
         return np.where(bools if not invert else not bools)[0]
 
+    def select_by_bool(self, bools: np.ndarray, invert: bool = False):
+        return self._select_by_idx(self._bool2index(bools),invert=invert)
+    
     def get_index_by_normals(self, comfunc=lambda ns: np.ones(len(ns),dtype=bool), invert: bool = False) -> np.ndarray:
-        if not self.pcd.has_normals():
-            self.pcd.estimate_normals()
-        res = comfunc(np.asarray(self.pcd.normals))
-        return self._select_by_idx()
-    
-    # def select_by_normals_index(self, comfunc=lambda ns: np.ones(len(ns),dtype=bool), invert: bool = False):
-    #     if not self.pcd.has_normals():
-    #         self.pcd.estimate_normals()
-    #     res = comfunc(np.asarray(self.pcd.normals))
-    #     return np.where(res)[0]
-    
+        if not self.has_normals():self.estimate_normals()
+        return self._bool2index(comfunc(self.get_normals()),invert=invert)
+        
     def select_by_normals(self, comfunc: Callable[[np.ndarray], np.ndarray] = lambda ns: np.ones(len(ns), dtype=bool), invert: bool = False):
         return self._select_by_idx(self.get_index_by_normals(comfunc=comfunc), invert=invert)
 
-    def select_by_normals_cosine_index(self, model: np.ndarray, similarity: float = 0.99, invert: bool = False):
+    def get_index_by_normals_cosine(self, model: np.ndarray, similarity: float = 0.99, invert: bool = False):
         comp = lambda ns:(ns@model[:3])/(np.linalg.norm(ns,axis=1) *np.linalg.norm(model[:3]))>=similarity
-        return self.select_by_normals_index(comfunc=comp)
+        return self.get_index_by_normals(comfunc=comp,invert=invert)
     
     def select_by_normals_cosine(self, model: np.ndarray, similarity: float = 0.99, invert: bool = False):
-        return self._select_by_idx(self.select_by_normals_cosine_index(model=model,similarity=similarity), invert=invert)
+        return self._select_by_idx(self.get_index_by_normals_cosine(model=model,similarity=similarity), invert=invert)
     
-    def select_by_colors_index(self, comfunc: Callable[[np.ndarray], np.ndarray] = lambda ns: np.ones(len(ns), dtype=bool), invert: bool = False):
-        res = comfunc(np.asarray(self.pcd.colors))
-        return np.where(res)[0]
+    def get_index_by_colors(self, comfunc: Callable[[np.ndarray], np.ndarray] = lambda rgb: np.ones(len(rgb), dtype=bool), invert: bool = False):
+        return self._bool2index(comfunc(self.get_colors()),invert=invert)
     
-    def select_by_colors_cosine_index(self, model: np.ndarray, similarity: float = 0.99, invert: bool = False):
+    def get_index_by_colors_cosine(self, model: np.ndarray, similarity: float = 0.99, invert: bool = False):
         comp = lambda ns:(ns@model[:3])/(np.linalg.norm(ns,axis=1) *np.linalg.norm(model[:3]))>=similarity
-        return self.select_by_colors_index(comfunc=comp,invert=invert)
+        return self.get_index_by_colors(comfunc=comp,invert=invert)
     
     def select_by_colors_cosine(self, model: np.ndarray, similarity: float = 0.99, invert: bool = False):
-        return self._select_by_idx(self.select_by_colors_cosine_index(model=model,similarity=similarity), invert=invert)
+        return self._select_by_idx(self.get_index_by_colors_cosine(model=model,similarity=similarity), invert=invert)
 
-    def select_by_sphere(self, center: np.ndarray, radius: float = 0.1, invert: bool = False):
-        return self._select_by_idx(self.select_by_sphere_index(center,radius), invert=invert)
+    def get_index_by_radius(self, r:float, invert: bool = False):
+        return self.get_index_by_XYZ(lambda Xs,Ys,Zs:(Xs**2+Ys**2+Zs**2)**0.5<=r,invert=invert)
+    
+    def select_by_radius(self, r:float, invert: bool = False):
+        return self._select_by_idx(self.get_index_by_radius(r),invert=invert)
 
-    def select_by_sphere_index(self, center: np.ndarray, radius: float = 0.1, invert: bool = False):
-        return self.select_by_XYZ_index(lambda Xs,Ys,Zs:((Xs-center[0])**2 + (Ys-center[1])**2 + (Zs-center[2])**2)**0.5 < radius, invert=invert=invert)
-
-    def select_by_XYZ_index(self, comfunc: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] = lambda Xs, Ys, Zs: np.ones(len(Xs), dtype=bool), invert: bool = False):
-        ps = np.asarray(self.pcd.points)
+    def get_index_by_XYZ(self, comfunc: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] = lambda Xs, Ys, Zs: np.ones(len(Xs), dtype=bool), invert: bool = False):
+        ps = self.get_points()
         Xs,Ys,Zs = ps[:,0],ps[:,1],ps[:,2]
-        res = comfunc(Xs,Ys,Zs)
-        return np.where(res)[0]
+        return self._bool2index(comfunc(Xs,Ys,Zs),invert=invert)
     
     def select_by_XYZ(self, comfunc: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] = lambda Xs, Ys, Zs: np.ones(len(Xs), dtype=bool), invert: bool = False):
-        return self._select_by_idx(self.select_by_XYZ_index(comfunc), invert=invert)
+        return self._select_by_idx(self.get_index_by_XYZ(comfunc), invert=invert)
     
     def select_by_plane(self, model: np.ndarray, thickness: float = 0.03, invert: bool = False):
         p = np.asarray(self.pcd.points)
@@ -317,7 +313,7 @@ class PointCloudSelections(PointCloudBase):
         return self._select_by_idx(self.select_by_aabb_list_index(aabb_min, aabb_max))
 
     def select_by_aabb_index(self, aabb_min: np.ndarray, aabb_max: np.ndarray, invert: bool = False):
-        return self.select_by_XYZ_index(lambda Xs,Ys,Zs: Xs>=aabb_min[0] and Xs<=aabb_max[0] and
+        return self.get_index_by_XYZ(lambda Xs,Ys,Zs: Xs>=aabb_min[0] and Xs<=aabb_max[0] and
                                                          Ys>=aabb_min[1] and Ys<=aabb_max[1] and
                                                          Zs>=aabb_min[2] and Zs<=aabb_max[2] )
         # points = self.get_points()
@@ -331,11 +327,6 @@ class PointCloudSelections(PointCloudBase):
     def select_by_topN(self, n: int):
         return self._select_by_idx(np.arange(self.size())[:n])
 
-    def select_by_radius_index(self, r:float):
-        return self.select_by_XYZ_index(lambda Xs,Ys,Zs:(Xs**2+Ys**2+Zs**2)**0.5<=r)
-    
-    def select_by_radius(self, r:float):
-        return self._select_by_idx(self.select_by_radius_index(r))
 
 class PointCloudUtility(PointCloudSelections):
     def create_from_sphere(self,r=1.0,cent=[0,0,0],number_of_points=10000):
@@ -353,10 +344,6 @@ class PointCloudUtility(PointCloudSelections):
         for j in ul:
             pcds.append(self.select_by_bool(self.labels==j))
         return pcds,ul
-                  
-    def estimate_normals(self, param=o3d.geometry.KDTreeSearchParamKNN(30)):
-        self.pcd.estimate_normals(param)
-        return self
       
     def centralize(self):
         self.translate(-self.get_center())
