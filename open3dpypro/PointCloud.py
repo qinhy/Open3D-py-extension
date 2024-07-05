@@ -311,7 +311,6 @@ class PointCloudSelections(PointCloudBase):
     def select_by_topN(self, n: int):
         return self._select_by_idx(np.arange(self.size())[:n])
 
-
 class PointCloudUtility(PointCloudSelections):
     def create_from_sphere(self,r=1.0,cent=[0,0,0],number_of_points=10000):
         pcd = o3d.geometry.TriangleMesh.create_sphere(r
@@ -567,7 +566,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
     ############################# pye57 part ######################################
     try:
         import pye57
-        from E57File import E57File        
+        from .E57File import E57File        
         def _get_data_raw_e57(self, xyz: np.ndarray, rgb: np.ndarray = None, intensity: np.ndarray = None, col_row: np.ndarray = None, normals: np.ndarray = None):
             data_raw = {}
     
@@ -631,7 +630,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
             return pcd
         
         def read_e57(self, file_path: str, scan_No: int = -1, rgb: bool = False, intensity: bool = False, row_column: bool = False, infoOnly: bool = False):
-            from E57File import E57File
+            from .E57File import E57File
             if self.e57 is None:
                 self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
             else:
@@ -642,7 +641,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
             return self._read_e57(scan_No, infoOnly)
         
         def read_e57_gen(self, file_path: str, rgb: bool = False, intensity: bool = False, row_column: bool = False):
-            from E57File import E57File
+            from .E57File import E57File
             if self.e57 is None:
                 self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
             else:
@@ -654,7 +653,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
                 yield self._read_e57(i,infoOnly=False)
                 
         def read_e57_scan_gen(self, file_path: str, scan_No: int = 0, rgb: bool = False, intensity: bool = False, row_column: bool = False):
-            from E57File import E57File
+            from .E57File import E57File
             if self.e57 is None:
                 self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
             else:
@@ -669,7 +668,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
                 yield pcd
                 
         def read_e57_gen_scan_gen(self, file_path: str, rgb: bool = False, intensity: bool = False, row_column: bool = False):
-            from E57File import E57File
+            from .E57File import E57File
             if self.e57 is None:
                 self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
             else:
@@ -686,7 +685,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
 
         def e572las(self, from_path: str, to_path: str=None, rgb: bool = False, intensity: bool = False, row_column: bool = False):
             if to_path is None:to_path=from_path.replace('.e57','.las')
-            from E57File import E57File
+            from .E57File import E57File
             if self.e57 is None:
                 self.e57 = E57File(from_path)
                 self.e57.intensity = self.e57.has_intensity()
