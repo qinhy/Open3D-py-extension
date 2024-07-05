@@ -233,12 +233,8 @@ class PointCloudSelections(PointCloudBase):
             np.square(dir_vectors @ x_direction) < x_half_length,
             np.square(dir_vectors @ y_direction) < y_half_length,
             np.square(dir_vectors @ z_direction) < z_half_length
-        ))
-        
-        # Create a new point cloud with the selected points
-        selected_pcd = self.select_by_bool(in_box,invert=invert)
-
-        return selected_pcd
+        ))        
+        return self.select_by_bool(in_box,invert=invert)
     
     def _bool2index(self, bools: np.ndarray, invert: bool = False) -> np.ndarray:
         return np.where(bools if not invert else not bools)[0]
