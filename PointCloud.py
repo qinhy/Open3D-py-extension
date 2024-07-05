@@ -389,7 +389,6 @@ class PointCloudUtility(PointCloudSelections):
         res = self.pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio, print_progress=print_progress)
         return self.select_by_index(res[1]),res[1]
     
-    
     def merge_pcds(self, raw_pcds: np.ndarray, rgb: bool = False, intensity: bool = False, normals: bool = False, labels: bool = False):
         pcds = [p if hasattr(p,'pcd') else self.__class__(p) for p in raw_pcds]        
         ps = np.vstack([ np.asarray(pcd.pcd.points) for pcd in pcds])
@@ -802,7 +801,6 @@ class PointCloud(PointCloudUtility):
             return [self.select_by_index(np.arange(len(labels))[labels==i])for i in range(len(set(labels)-{-1}))],labels
     except Exception as e:
         print(e,'can not do sklearn.cluster DBSCAN')
-
     
     def rotate_to_plane(self, plane: np.ndarray) -> None:
         a,b,c,d = plane
@@ -813,7 +811,6 @@ class PointCloud(PointCloudUtility):
         T[:3,:3] = R
         self.pcd.transform(T)
         return self,T
-    
     
     def seg_planes(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450, top_n: float = 10e9, minPointsRatio: float = 0.1) -> None:
         """
