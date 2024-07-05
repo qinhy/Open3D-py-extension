@@ -27,34 +27,25 @@ class PointCloudBase:
             self.pcd = xyz
         else:
             self.pcd = o3d.geometry.PointCloud()
-            if intensity is not None and len(intensity)>0 and np.prod(intensity.shape)>0:
-                self.set_intensity(intensity)
-                
-            if row_index is not None and len(row_index)>0 and np.prod(row_index.shape)>0:
-                self.row_index = row_index
-            
-            if column_index is not None and len(column_index)>0 and np.prod(column_index.shape)>0:
-                self.column_index = column_index
-
-            if xyz is not None and np.prod(xyz.shape)>0:
-                self.set_points(xyz)
-                
-            if rgb is not None and len(rgb)>0 and np.prod(rgb.shape)>0:
-                if rgb.dtype == np.uint8:
-                    rgb = rgb/255.0
+            base_check = lambda arr: arr is not None and len(arr)>0 and np.prod(arr.shape)>0
+            if base_check(intensity): self.set_intensity(intensity)
+            if base_check(row_index): self.row_index = row_index
+            if base_check(column_index): self.column_index = column_index
+            if base_check(xyz): self.set_points(xyz)
+            if base_check(normals): self.set_normals(normals)
+            if base_check(rgb):
+                if rgb.max()>1.0 or rgb.min()<0.0:         
+                    rgb = rgb*1.0           
+                    rgb = (rgb-rgb.min())/(rgb.max()-rgb.min())
                 self.set_rgb(rgb)
-                
-            if normals is not None and len(normals)>0:
-                self.set_normals(normals)
 
-        self.pcd_tree = None
+        self.pcd_tree   = None
         self.get_center = self.pcd.get_center
         self.has_colors = self.pcd.has_colors
         self.has_points = self.pcd.has_points
-        self.is_empty = self.pcd.is_empty
-        self.rotate = self.pcd.rotate
-        self.segment_plane = self.pcd.segment_plane
-        self.scan_No = -1
+        self.is_empty   = self.pcd.is_empty
+        self.rotate     = self.pcd.rotate
+        self.scan_No    = -1
     
     def __del__(self):
         if self.e57:self.e57.close()
@@ -78,6 +69,10 @@ class PointCloudBase:
         self.pcd.estimate_normals(param)
         return self
     
+    def segment_plane(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450) -> tuple[list, np.ndarray]:
+        [a, b, c, d],inlines_idx = self.pcd.segment_plane(distance_threshold=thickness,ransac_n=ransac_n,num_iterations=num_iterations)
+        return [a, b, c, d],inlines_idx                   
+                  
     def has_rgb(self) -> bool:
         return self.has_points() and self.size() == len(self.pcd.colors)
     
@@ -171,13 +166,11 @@ class PointCloudBase:
         return o3d.io.write_point_cloud(filename=filename, pointcloud=self.pcd, write_ascii=write_ascii,
                   compressed=compressed, print_progress=print_progress)
     
-    def draw(self, geos: List[o3d.geometry.Geometry] = [], point_size: int = 1, centralize: bool = False) -> None:
-        geos += [self]
-        geos = [(i.pcd if hasattr(i, 'pcd') else i) for i in geos]
+    def draw(self, geos: List[o3d.geometry.Geometry] = [], point_size: int = 1, centralize: bool = False):
+        geos = [(i.pcd if hasattr(i, 'pcd') else i) for i in geos + [self]]
         if centralize:
-            cent = np.asarray([p.get_center() for p in geos]).mean(0)
-            for p in geos:
-                p.translate(cent)
+            cent = np.asarray([p.get_center() for p in geos if hasattr(p, 'get_center') ]).mean(0)
+            for p in geos: p.translate(cent)
         o3d.visualization.draw([o3d.geometry.TriangleMesh.create_coordinate_frame()]+geos,point_size=point_size)
         return self
     
@@ -189,10 +182,10 @@ class PointCloudSelections(PointCloudBase):
     def _select_by_idx(self, indices: np.ndarray, invert: bool = False):
         res = self.__class__()
         if invert:
-            idx = np.ones(len(self.pcd.points),dtype=bool)
+            idx = np.ones(self.size(),dtype=bool)
             idx[indices] = False
         else:
-            idx = np.zeros(len(self.pcd.points),dtype=bool)
+            idx = np.zeros(self.size(),dtype=bool)
             idx[indices] = True
 
         if self.has_points():
@@ -212,7 +205,6 @@ class PointCloudSelections(PointCloudBase):
         x_direction = np.asarray(x_direction)
         y_direction = np.asarray(y_direction)
         z_direction = np.asarray(z_direction)
-        center = np.asarray(center)
         
         x_direction /= np.linalg.norm(x_direction)
         y_direction /= np.linalg.norm(y_direction)
@@ -221,12 +213,9 @@ class PointCloudSelections(PointCloudBase):
         x_half_length = np.linalg.norm(x_direction) ** 2
         y_half_length = np.linalg.norm(y_direction) ** 2
         z_half_length = np.linalg.norm(z_direction) ** 2
-        
-        # Convert Open3D point cloud to numpy array
-        points = self.get_points()
-        
+
         # Calculate the direction vectors from the center to each point
-        dir_vectors = points - center
+        dir_vectors = self.get_points() - np.asarray(center)
 
         # Check each point's position relative to the box defined by the direction vectors and half-lengths
         in_box = np.logical_and.reduce((
@@ -280,8 +269,8 @@ class PointCloudSelections(PointCloudBase):
     def select_by_XYZ(self, comfunc: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] = lambda Xs, Ys, Zs: np.ones(len(Xs), dtype=bool), invert: bool = False):
         return self._select_by_idx(self.get_index_by_XYZ(comfunc), invert=invert)
     
-    def select_by_plane(self, model: np.ndarray, thickness: float = 0.03, invert: bool = False):
-        p = np.asarray(self.pcd.points)
+    def get_index_by_plane(self, model: np.ndarray, thickness: float = 0.03, invert: bool = False):
+        p = self.get_points()
         a,b,c,d = model
         abc = np.asarray([a,b,c]).reshape(3,1)
         if type(thickness) is tuple:
@@ -293,32 +282,31 @@ class PointCloudSelections(PointCloudBase):
             res = (np.abs(p @ abc + d)/(a**2+b**2+c**2)**0.5) < thickness
             if invert:
                 res = np.logical_not(res)
-        idx = np.where(res)[0]
-        return self._select_by_idx(idx),idx
+        return self._bool2index(res)
+
+    def select_by_plane(self, model: np.ndarray, thickness: float = 0.03, invert: bool = False):
+        return self._select_by_idx(self.get_index_by_plane(model,thickness),invert=invert)
     
-    def select_by_aabb_list_index(self, aabb_min_max_list: np.ndarray):
+    def get_index_by_aabb_list(self, aabb_min_max_list: np.ndarray, invert: bool = False):
         points = self.get_points()
         is_inside = np.ones_like(points,dtype=bool)
         for aabb_min, aabb_max in aabb_min_max_list:
             aabb_min, aabb_max = np.asarray(aabb_min), np.asarray(aabb_max)
             is_inside = np.logical_or(np.logical_and((points >= aabb_min) , (points <= aabb_max)), is_inside)
         is_inside = np.all(is_inside, axis=1)
-        return np.arange(self.size())[is_inside]
+        return self._bool2index(is_inside,invert=invert)
     
     def select_by_aabb_list(self, aabb_min: np.ndarray, aabb_max: np.ndarray):
-        return self._select_by_idx(self.select_by_aabb_list_index(aabb_min, aabb_max))
+        return self._select_by_idx(self.get_index_by_aabb_list(aabb_min, aabb_max))
 
-    def select_by_aabb_index(self, aabb_min: np.ndarray, aabb_max: np.ndarray, invert: bool = False):
-        return self.get_index_by_XYZ(lambda Xs,Ys,Zs: Xs>=aabb_min[0] and Xs<=aabb_max[0] and
-                                                         Ys>=aabb_min[1] and Ys<=aabb_max[1] and
-                                                         Zs>=aabb_min[2] and Zs<=aabb_max[2] )
-        # points = self.get_points()
-        # aabb_min, aabb_max = np.asarray(aabb_min), np.asarray(aabb_max)
-        # is_inside = np.all(np.logical_and((points >= aabb_min) , (points <= aabb_max)), axis=1)
-        # return self.select_by_bool(is_inside,invert=invert)
+    def get_index_by_aabb(self, aabb_min: np.ndarray, aabb_max: np.ndarray, invert: bool = False):
+        points = self.get_points()
+        aabb_min, aabb_max = np.asarray(aabb_min), np.asarray(aabb_max)
+        is_inside = np.all(np.logical_and((points >= aabb_min) , (points <= aabb_max)), axis=1)
+        return self._bool2index(is_inside,invert=invert)
     
-    def select_by_aabb(self, aabb_min: np.ndarray, aabb_max: np.ndarray):
-        return self._select_by_idx(self.select_by_aabb_index(aabb_min, aabb_max))
+    def select_by_aabb(self, aabb_min: np.ndarray, aabb_max: np.ndarray, invert: bool = False):
+        return self._select_by_idx(self.get_index_by_aabb(aabb_min, aabb_max),invert=invert)
 
     def select_by_topN(self, n: int):
         return self._select_by_idx(np.arange(self.size())[:n])
@@ -381,9 +369,9 @@ class PointCloudUtility(PointCloudSelections):
     
     def merge_pcds(self, raw_pcds: np.ndarray, rgb: bool = False, intensity: bool = False, normals: bool = False, labels: bool = False):
         pcds = [p if hasattr(p,'pcd') else self.__class__(p) for p in raw_pcds]        
-        ps = np.vstack([ np.asarray(pcd.pcd.points) for pcd in pcds])
+        ps = np.vstack([ pcd.get_points() for pcd in pcds])
         pcdres = self.__class__(ps)
-        
+
         if rgb:        
             ps = np.vstack([ pcd.get_colors() if pcd.has_colors() else np.ones((pcd.size(),3),dtype=float) for pcd in pcds])
             pcdres.set_rgb(ps)
@@ -408,26 +396,24 @@ class PointCloudUtility(PointCloudSelections):
         return self
     
     def distance2plane(self, plane: np.ndarray) -> np.ndarray:
-        pcdp = np.asarray(self.pcd.points)
         a,b,c,d = plane
-        d = (pcdp*np.asarray([a,b,c])).sum(1)+d
+        d = (self.get_points()*np.asarray([a,b,c])).sum(1)+d
         d = d/(a**2+b**2+c**2)**0.5
         return d
         
-    def remove_plane_outlier(self, plane_model: np.ndarray, thickness: float = 0.03, similarity: float = 0.999, invert: bool = False) -> None:
-        pch2idx = self.select_by_normals_index(lambda ns:((ns@plane_model[:3])/(np.linalg.norm(ns,axis=1) *np.linalg.norm(plane_model[:3])))>=similarity)#maskByNormls(pc,nor=plane_model[:3],threshold=similarity) & res 
+    def remove_plane_outlier(self, plane_model: np.ndarray, thickness: float = 0.03, similarity: float = 0.999, invert: bool = False):
+        pch2idx = self.get_index_by_normals_cosine(plane_model,similarity)
         tmp,planeidx = self._select_by_idx(pch2idx).select_by_plane(plane_model,thickness)
-        flooridx = np.arange(len(self.pcd.points))[pch2idx][planeidx]     
+        flooridx = np.arange(self.size())[pch2idx][planeidx]
         floor = self._select_by_idx(flooridx)
         return floor,flooridx
 
-    def project2plane(self, plane: np.ndarray) -> None:
+    def project2plane(self, plane: np.ndarray):
         plane = np.asarray(plane)
         plane[:3] = plane[:3]#/np.linalg.norm(plane[:3])
-        ps = np.asarray(self.pcd.points)
         dis = self.distance2plane(plane)
         dis = dis.reshape(-1,1)*plane[:3].reshape(1,3)
-        return self.__class__(ps-dis)
+        return self.__class__(self.get_points()-dis)
     
     def seg_plane_by_svd(self):
         centroid = self.get_points().mean(axis=0)
@@ -441,7 +427,7 @@ class PointCloudUtility(PointCloudSelections):
         # print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
         return a, b, c, d
     
-class PointCloud(PointCloudUtility):
+class PointCloudAdvanceIO(PointCloudUtility):
     try:
         from PIL import Image
         def _open_img(self, path: str):
@@ -515,7 +501,7 @@ class PointCloud(PointCloudUtility):
             las.y = ps[:, 1].astype(np.float32)
             las.z = ps[:, 2].astype(np.float32)
             if self.has_rgb():
-                rgb = np.asarray(self.pcd.colors)
+                rgb = self.get_colors()
                 las.red   = (rgb[:, 0]*255).astype(np.uint8)
                 las.green = (rgb[:, 1]*255).astype(np.uint8)
                 las.blue  = (rgb[:, 2]*255).astype(np.uint8)
@@ -576,8 +562,156 @@ class PointCloud(PointCloudUtility):
             las.write(path)
     except Exception as e:
         print(e,'can not do laspy IO!')
+
+
+    ############################# pye57 part ######################################
+    try:
+        import pye57
+        from E57File import E57File        
+        def _get_data_raw_e57(self, xyz: np.ndarray, rgb: np.ndarray = None, intensity: np.ndarray = None, col_row: np.ndarray = None, normals: np.ndarray = None):
+            data_raw = {}
     
+            data_raw['cartesianX'] = xyz[:,0].flatten().astype(np.float64)
+            data_raw['cartesianY'] = xyz[:,1].flatten().astype(np.float64)
+            data_raw['cartesianZ'] = xyz[:,2].flatten().astype(np.float64)
     
+            if rgb is not None:
+                data_raw['colorRed']   = (rgb[:,0]*255).flatten().astype(np.uint8)
+                data_raw['colorGreen'] = (rgb[:,1]*255).flatten().astype(np.uint8)
+                data_raw['colorBlue']  = (rgb[:,2]*255).flatten().astype(np.uint8)
+    
+            if intensity is not None:
+                data_raw['intensity']  = intensity.flatten().astype(np.float32)
+    
+            if col_row is not None:
+                col,row = col_row
+                data_raw['rowIndex']  = row.flatten().astype(np.uint32)
+                data_raw['columnIndex']  = col.flatten().astype(np.uint32)
+            
+            if normals is not None:
+                normals = self.get_normals()
+                data_raw['normalX']  = normals[:,0].flatten().astype(np.float32)
+                data_raw['normalY']  = normals[:,1].flatten().astype(np.float32)
+                data_raw['normalZ']  = normals[:,2].flatten().astype(np.float32)                
+            return data_raw
+        
+        def save_pcds_e57(self, pcds: np.ndarray, filename: str, name: str = None, rotation: np.ndarray = None, translation: np.ndarray = None, labels: bool = False):
+            import pye57
+            e57_write = pye57.E57(filename, mode='w')
+            for i,pcd in enumerate(pcds):
+                scan_header = pcd.e57.scan_headers[pcd.scan_No] if pcd.scan_No>0 else None
+                # data_raw = {}
+                data_raw = self._get_data_raw_e57(self.get_points(),
+                               self.get_colors() if self.has_rgb() else None,
+                               self.get_intensity() if self.has_intensity() else None,
+                               self.get_col_row() if self.has_col_row() else None,
+                               )
+        
+                e57_write.write_scan_raw(data_raw, name=name, rotation=rotation, translation=translation, scan_header=scan_header)
+        
+        def save_e57(self, filename: str, name: str = None, rotation: np.ndarray = None, translation: np.ndarray = None, labels: bool = False):
+            import pye57
+            e57_write = pye57.E57(filename, mode='w')
+            scan_header = self.e57.scan_headers[self.scan_No] if self.scan_No>0 else None
+            data_raw = self._get_data_raw_e57(self.get_points(),
+                           self.get_colors() if self.has_rgb() else None,
+                           self.get_intensity() if self.has_intensity() else None,
+                           self.get_col_row() if self.has_col_row() else None,
+                           self.get_normals() if self.has_normals() else None
+                           )
+                
+            e57_write.write_scan_raw(data_raw, name=name, rotation=rotation, translation=translation, scan_header=scan_header)
+
+        def _read_e57(self, scan_No: int = -1, infoOnly: bool = False):
+            if infoOnly:return PointCloud(e57 = self.e57)
+            xyz,rgb,intensity,row_index,column_index = self.e57.read(scan_No) if scan_No >= 0 else self.e57.readall()
+            pcd = self.__class__(xyz=xyz,rgb=rgb,intensity=np.expand_dims(intensity,1),row_index=row_index,column_index=column_index,e57 = self.e57)
+            pcd.scan_No = scan_No
+            pcd.e57 = self.e57
+            return pcd
+        
+        def read_e57(self, file_path: str, scan_No: int = -1, rgb: bool = False, intensity: bool = False, row_column: bool = False, infoOnly: bool = False):
+            from E57File import E57File
+            if self.e57 is None:
+                self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
+            else:
+                self.e57.intensity = intensity
+                self.e57.colors = rgb
+                self.e57.column_index = row_column
+                self.e57.point_file = file_path
+            return self._read_e57(scan_No, infoOnly)
+        
+        def read_e57_gen(self, file_path: str, rgb: bool = False, intensity: bool = False, row_column: bool = False):
+            from E57File import E57File
+            if self.e57 is None:
+                self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
+            else:
+                self.e57.intensity = intensity
+                self.e57.colors = rgb
+                self.e57.column_index = row_column
+                self.e57.point_file = file_path
+            for i in range(self.e57.scan_count):
+                yield self._read_e57(i,infoOnly=False)
+                
+        def read_e57_scan_gen(self, file_path: str, scan_No: int = 0, rgb: bool = False, intensity: bool = False, row_column: bool = False):
+            from E57File import E57File
+            if self.e57 is None:
+                self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
+            else:
+                self.e57.intensity = intensity
+                self.e57.colors = rgb
+                self.e57.column_index = row_column
+                self.e57.point_file = file_path
+            for data in self.e57.read_scan_gen(scan_No):
+                xyz,rgb,intensity,row_index,column_index=data
+                pcd = self.__class__(xyz=xyz,rgb=rgb,intensity=np.expand_dims(intensity,1),row_index=row_index,column_index=column_index,e57=self.e57)
+                pcd.scan_No = scan_No
+                yield pcd
+                
+        def read_e57_gen_scan_gen(self, file_path: str, rgb: bool = False, intensity: bool = False, row_column: bool = False):
+            from E57File import E57File
+            if self.e57 is None:
+                self.e57 = E57File(file_path, intensity=intensity, colors=rgb, row_column=row_column, printinfo=True)
+            else:
+                self.e57.intensity = intensity
+                self.e57.colors = rgb
+                self.e57.column_index = row_column
+                self.e57.point_file = file_path
+            for scan_No in range(self.e57.scan_count):
+                for data in self.e57.read_scan_gen(scan_No):
+                    xyz,rgb,intensity,row_index,column_index=data
+                    pcd = self.__class__(xyz=xyz,rgb=rgb,intensity=np.expand_dims(intensity,1),row_index=row_index,column_index=column_index,e57=self.e57)
+                    pcd.scan_No = scan_No
+                    yield pcd
+
+        def e572las(self, from_path: str, to_path: str=None, rgb: bool = False, intensity: bool = False, row_column: bool = False):
+            if to_path is None:to_path=from_path.replace('.e57','.las')
+            from E57File import E57File
+            if self.e57 is None:
+                self.e57 = E57File(from_path)
+                self.e57.intensity = self.e57.has_intensity()
+                self.e57.colors = self.e57.has_color()
+                self.e57.row_column = self.e57.has_row_column()
+                self.e57.point_file = from_path
+            cnt = 0
+            for i,p in enumerate(self.read_e57_gen_scan_gen(from_path,rgb,intensity,row_column)):
+                tmp = p.save_las(to_path) if i==0 else p.append_save_las(to_path)
+                cnt += p.size()
+                del p
+                yield cnt/self.e57.all_points
+        
+        def pcd2las(self, from_path: str, to_path: str=None):
+            if to_path is None:to_path=from_path.replace('.pcd','.las')
+            p = self.read_pcd(from_path)
+            yield 0.5
+            p.save_las(to_path)
+            yield 1.0
+
+    except Exception as e:
+        print(e,'can not do pye57 func of [save_e57 , read_e57]')
+        
+class PointCloud(PointCloudAdvanceIO):
+
     def split_pcd_index(self, nn: int, random: bool = False):
         idx = self.size()
         if idx<=nn:return [np.arange(idx)]
@@ -636,7 +770,7 @@ class PointCloud(PointCloudUtility):
         else:
             return np.eye(3) #cross of all zeros only occurs on identical directions
 
-    def rotate_by_normal(self, plane: np.ndarray) -> None:
+    def rotate_by_normal(self, plane: np.ndarray):
         a,b,c,d = plane
         T = np.eye(4)
         T[2,3] = d
@@ -652,17 +786,17 @@ class PointCloud(PointCloudUtility):
             usecolor = True
         if color and not usecolor:
             print('has no rgb data, cannot use color!')
-        points2d = np.asarray(self.pcd.points)
+        points2d = self.get_points()
         minx,miny = points2d[:,0].min(),points2d[:,1].min()
-        T =   np.asarray([[1., 0., 0., -minx],
+        T =   np.asarray([ [1., 0., 0., -minx],
                            [0., 1., 0., -miny],
                            [0., 0., 1., 0.],
                            [0., 0., 0., 1.]])
-        
-        T =   np.asarray([[1/resolution, 0., 0., 0.],
-                           [0., 1/resolution, 0., 0.],
-                           [0., 0., 1/resolution, 0.],
-                           [0., 0., 0., 1.]]) @ T    
+        ir = 1/resolution
+        T =   np.asarray([ [ir, 0., 0., 0.],
+                           [0., ir, 0., 0.],
+                           [0., 0., ir, 0.],
+                           [0., 0., 0., 1.]]) @ T
         
         R,t = T[:3,:3],T[:3,3]
         tmp = ( (R @ points2d.T).T + t).round().astype(int)
@@ -674,7 +808,7 @@ class PointCloud(PointCloudUtility):
         iy[iy<0] = 0
         iy[iy>(sizey-1)] = sizey-1
         if usecolor:
-            rgb = np.asarray(self.pcd.colors)
+            rgb = self.get_colors()
             img = np.zeros((sizey,sizex,3),np.uint8)
             img[iy,ix] = (rgb*255).astype(np.uint8)
         else:
@@ -689,9 +823,9 @@ class PointCloud(PointCloudUtility):
     ############################# cv2 part ######################################
     try:
         import cv2
-        def read_single_RGB(self, file: str, sampling_step: int = 10, resolution: float = 0.01, y_as_z: bool = True) -> None:
+        def read_single_RGB(self, file: str, sampling_step: int = 10, resolution: float = 0.01, y_as_z: bool = True):
             import cv2
-            img = cv2.imread(file)
+            img:np.ndarray = cv2.imread(file)
             height,width = img.shape[:2]
             resolution_mat = np.eye(4)*resolution
             resolution_mat[-1,-1] = 1
@@ -714,12 +848,13 @@ class PointCloud(PointCloudUtility):
             pcd.transform(img2real)
             return pcd
         
-        def detect_3d_circles(self, plane: np.ndarray = np.asarray([0.95, -0.32, 0.02, 1.54]), thickness: float = 0.05, resolution: float = 0.005, minRadius: float = 0.045, maxRadius: float = 0.495, minInertiaRatio: float = 0.75, vis: bool = False) -> None:
+        def detect_3d_circles(self, plane: np.ndarray = np.asarray([0.95, -0.32, 0.02, 1.54]),
+                                    thickness: float = 0.05, resolution: float = 0.005, minRadius: float = 0.045, maxRadius: float = 0.495,
+                                    minInertiaRatio: float = 0.75, vis: bool = False):
             import cv2
-            hsteelplane = plane    
-            TT = np.eye(4)
-            pcd,idx = self.select_by_plane(hsteelplane,thickness)
-            seg3,T = pcd.rotate_by_normal(hsteelplane)
+            TT     = np.eye(4)
+            pcd    = self.select_by_plane(plane,thickness)
+            seg3,T = pcd.rotate_by_normal(plane)
             TT = T @ TT
             res,minx,T,miny,invT,resolution,idx2img = seg3.to_2D_Img(resolution)
             TT = T @ TT
@@ -731,40 +866,39 @@ class PointCloud(PointCloudUtility):
             params.filterByArea = True
             params.minArea = int(np.pi*(0.1/resolution)**2)+1
             
-            detector = cv2.SimpleBlobDetector_create(params)
+            detector  = cv2.SimpleBlobDetector_create(params)
             keypoints = detector.detect(image)
-            blank = np.zeros((1, 1))
-            blobs = cv2.drawKeypoints(image, keypoints, blank, (0, 0, 255),cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+            blank     = np.zeros((1, 1))
+            blobs     = cv2.drawKeypoints(image, keypoints, blank, (0, 0, 255),cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
             if vis:
                 cv2.imshow("Blobs Using Area", blobs)
                 # cv2.imshow("Blobs Using Area", cv2.resize(blobs,(512,512)))
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
-            if len(keypoints)==0:
-                return []
+            if len(keypoints)==0: return []
             pts = [[i.pt[0], i.pt[1], 0, 1] for i in keypoints]
             pts = np.asarray(pts)
             pts = pts @ np.linalg.inv(TT).T
-            r = np.asarray([i.size/2 * resolution for i in keypoints])
+            r   = np.asarray([i.size/2 * resolution for i in keypoints])
             pts[:,-1] = r  
             return pts
         
-        def simple_seg_connected_components_by_img(self, img: np.ndarray, minx: float, T: float, miny: float, invT: float, resolution: float, idx2img: Callable[[np.ndarray], np.ndarray]) -> None:
+        def simple_seg_connected_components_by_img(self, img: np.ndarray, minx: float, T: float, miny: float, invT: float, resolution: float, idx2img: Callable[[np.ndarray], np.ndarray]):
             import cv2
-            idx = np.asarray(idx2img)
-            nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(img)
-            # print(nlabels)
             pcds = []
+            idx  = np.asarray(idx2img)
+            nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(img)
             p_labels = labels[idx[:,1],idx[:,0]]
             for i in stats[:,-1].argsort()[::-1][1:]:
                 res = self._select_by_idx(np.where(p_labels==i)[0].tolist())
                 pcds.append(res)
             return pcds
 
-        def simple_seg_connected_components(self, plane: np.ndarray, thickness: float = 0.05, resolution: float = 0.1, minpoints: int = 20, top_n: int = 100) -> None:
+        def simple_seg_connected_components(self, plane: np.ndarray, thickness: float = 0.05, resolution: float = 0.1, minpoints: int = 20, top_n: int = 100):
             import cv2
-            floorMappcd,idx = self.select_by_plane(plane,thickness)
-            if len(floorMappcd.pcd.points)==0:return []
+            idx = self.get_index_by_plane(plane,thickness)
+            floorMappcd = self._select_by_idx(idx)
+            if floorMappcd.size()==0:return []
             img,minx,T,miny,invT,resolution,idx2img = floorMappcd.to_2D_Img(resolution=resolution)
             idx = np.asarray(idx2img)
             nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(img)
@@ -773,7 +907,7 @@ class PointCloud(PointCloudUtility):
             p_labels = labels[idx[:,1],idx[:,0]]
             for i in stats[:,-1].argsort()[::-1][1:top_n+1]:
                 res = floorMappcd._select_by_idx(np.where(p_labels==i)[0].tolist())
-                if len(res.pcd.points) < minpoints:
+                if res.size() < minpoints:
                     continue
                 pcds.append(res)
                 # o3d.visualization.draw(pcds)
@@ -784,25 +918,25 @@ class PointCloud(PointCloudUtility):
     ############################# sklearn part ######################################
     try :
         from sklearn.cluster import DBSCAN as skDBSCAN
-        def DBSCAN(self, eps: float = 0.05, min_samples: int = 3) -> None:
+        def DBSCAN(self, eps: float = 0.05, min_samples: int = 3):
             from sklearn.cluster import DBSCAN
-            clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(np.asarray(self.pcd.points))
+            clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(self.get_points())
             labels = clustering.labels_
             return [self._select_by_idx(np.arange(len(labels))[labels==i])for i in range(len(set(labels)-{-1}))],labels
     except Exception as e:
         print(e,'can not do sklearn.cluster DBSCAN')
     
-    def rotate_to_plane(self, plane: np.ndarray) -> None:
+    def rotate_to_plane(self, plane: np.ndarray):
         a,b,c,d = plane
         T = np.eye(4)
         T[2,3] = d
         z_axis = np.array([a,b,c])/np.linalg.norm(np.array([a,b,c]))
         R = self.rotation_matrix_from_vectors(z_axis, (0,0,1))
         T[:3,:3] = R
-        self.pcd.transform(T)
+        self.transform(T)
         return self,T
     
-    def seg_planes(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450, top_n: float = 10e9, minPointsRatio: float = 0.1) -> None:
+    def seg_planes(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450, top_n: float = 10e9, minPointsRatio: float = 0.1):
         """
         This method segments planes from the point cloud using RANSAC.
 
@@ -826,12 +960,12 @@ class PointCloud(PointCloudUtility):
         while outlier_cloud.size()/raw_size>minPointsRatio:
             cnt+=1             
             try:
-                [a, b, c, d],inlines = outlier_cloud.segment_plane(distance_threshold=thickness,ransac_n=ransac_n,num_iterations=num_iterations)
+                [a, b, c, d],inlines_idx = outlier_cloud.segment_plane(distance_threshold=thickness,ransac_n=ransac_n,num_iterations=num_iterations)
             except Exception as e:
                 print(e)
                 break
             planes.append([a, b, c, d])
-            inliners = outlier_cloud._select_by_idx(inlines)
+            inliners = outlier_cloud._select_by_idx(inlines_idx)
             
             #######################
             # cent = self.__class__(inliners.get_center().reshape(-1,3))
@@ -841,11 +975,11 @@ class PointCloud(PointCloudUtility):
             #######################            
             
             pcds.append(inliners)
-            aabbs.append(pcds[-1].get_aabb())
-            outlier_cloud = outlier_cloud._select_by_idx(inlines,True)
+            aabbs.append(inliners.get_aabb())
+            outlier_cloud = outlier_cloud._select_by_idx(inlines_idx,True)
             if len(planes)>top_n:break#return planes,pcds,aabbs         
         pcds.append(outlier_cloud)
-        aabbs.append(pcds[-1].get_aabb())
+        aabbs.append(outlier_cloud.get_aabb())
         return planes,pcds,aabbs
 
 
