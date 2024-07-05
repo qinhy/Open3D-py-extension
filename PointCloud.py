@@ -244,7 +244,7 @@ class PointCloudSelections(PointCloudBase):
         if not self.pcd.has_normals():
             self.pcd.estimate_normals()
         res = comfunc(np.asarray(self.pcd.normals))
-        return np.where(res)[0]
+        return self._select_by_idx()
     
     # def select_by_normals_index(self, comfunc=lambda ns: np.ones(len(ns),dtype=bool), invert: bool = False):
     #     if not self.pcd.has_normals():
