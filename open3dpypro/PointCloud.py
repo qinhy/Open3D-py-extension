@@ -451,8 +451,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
             img = self._open_img(path)
             if upsidedown: img = img[::-1]
             self.set_intensity(img.reshape(-1,1))
-        
-        
+                    
         def _save_img(self, name: str, src: np.ndarray, c: np.ndarray, dtype=np.uint8):
             from PIL import Image
             if dtype==np.uint8:           
