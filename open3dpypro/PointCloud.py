@@ -1,5 +1,6 @@
 import os
 import threading
+import uuid
 import open3d as o3d
 import numpy as np
 from typing import Callable, List
@@ -46,6 +47,7 @@ class PointCloudBase:
         self.is_empty   = self.pcd.is_empty
         self.rotate     = self.pcd.rotate
         self.scan_No    = -1
+        self.uuid       = uuid.uuid4()
     
     def __del__(self):
         if self.e57:self.e57.close()
@@ -550,7 +552,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
                 las = fh.read()
                 pf = las.point_format
             packed_point_record = laspy.PackedPointRecord.zeros(self.size(),pf)
-            lasdata = self.get_lasdata(las.header,packed_point_record)
+            lasdata = self.get_lasdata(las.header,packed_point_record,pt_src_id)
             with laspy.open(path, mode='a') as outlas:
                 outlas.append_points(lasdata.points)
 
@@ -558,7 +560,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
             import laspy
             h = laspy.LasHeader(point_format=3, version="1.2")
             h.scales = np.array([0.0001,0.0001,0.0001])
-            las = self.get_lasdata(h)
+            las = self.get_lasdata(h,pt_src_id=pt_src_id)
             las.write(path)
     except Exception as e:
         print(e,'can not do laspy IO!')
@@ -566,7 +568,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
     ############################# pye57 part ######################################
     try:
         import pye57
-        from .E57File import E57File        
+        from .E57File import E57File     
         def _get_data_raw_e57(self, xyz: np.ndarray, rgb: np.ndarray = None, intensity: np.ndarray = None, col_row: np.ndarray = None, normals: np.ndarray = None):
             data_raw = {}
     
