@@ -52,10 +52,9 @@ class PointCloudBase:
 
     def clear(self):
         self.pcd = o3d.geometry.PointCloud()
-        # self.init()
 
     def size(self):
-        return len(self.pcd.points)
+        return len(self.get_points())
     
     def transform(self, T: np.ndarray):
         self.pcd.transform(T)
@@ -336,26 +335,28 @@ class PointCloudUtility(PointCloudSelections):
     def voxel_down_sample_and_trace(self, voxel_size: float):
         pcd,idxmat,vec = self.pcd.voxel_down_sample_and_trace(voxel_size=voxel_size,
                         min_bound=self.pcd.get_min_bound(),max_bound=self.pcd.get_max_bound(), approximate_class=False)
-        return self.__class__(pcd),idxmat,vec
+        return self._select_by_idx(idxmat),idxmat,vec
     
     def random_down_sample(self, down_sample_ratio: float = 0.1):
         if down_sample_ratio<=0 or down_sample_ratio > 1:
             return self.__class__()
-        random_down_sample_pcd = self.pcd.random_down_sample(down_sample_ratio)
-        return self.__class__(random_down_sample_pcd)
+        idx = np.arange(self.size())
+        np.random.shuffle(idx)
+        idx = idx[:int(len(idx)*down_sample_ratio)]
+        return self._select_by_idx(idx)
     
     def uniform_down_sample(self, down_sample_ratio: float = 0.1):
         if down_sample_ratio<=0 or down_sample_ratio > 1:
             return self.__class__()
-        uniform_down_sample_pcd = self.pcd.uniform_down_sample(int(1/down_sample_ratio))
-        return self.__class__(uniform_down_sample_pcd)
+        idx = np.arange(self.size())[::int(1/down_sample_ratio)]
+        return self._select_by_idx(idx)
         
     def create_voxel(self, voxel_size: float = 0.05):
         voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(self.pcd,voxel_size=voxel_size)
         return voxel
     
     def voxel_down_sample(self, voxel_size: float):
-        return self.__class__(self.pcd.voxel_down_sample(voxel_size))
+        return self.voxel_down_sample_and_trace(voxel_size)[0]
 
     def read_mesh_as_pcd(self, path: str, sample_points_uniformly=None):
         if sample_points_uniformly is None:
@@ -451,7 +452,7 @@ class PointCloudAdvanceIO(PointCloudUtility):
             img = self._open_img(path)
             if upsidedown: img = img[::-1]
             self.set_intensity(img.reshape(-1,1))
-                    
+
         def _save_img(self, name: str, src: np.ndarray, c: np.ndarray, dtype=np.uint8):
             from PIL import Image
             if dtype==np.uint8:           
