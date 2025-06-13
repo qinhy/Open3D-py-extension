@@ -64,10 +64,13 @@ class PointCloudBase:
 
     def translate(self, t: np.ndarray):
         self.pcd.translate(t)
-        return self                   
-                  
-    def estimate_normals(self, param=o3d.geometry.KDTreeSearchParamKNN(30)):
-        self.pcd.estimate_normals(param)
+        return self
+    
+    def estimate_normals(self, method="default", param=o3d.geometry.KDTreeSearchParamKNN(30)):
+        if method == "poisson":
+            self.pcd.orient_normals_consistent_tangent_plane(k=30)
+        else:
+            self.pcd.estimate_normals(param)
         return self
     
     def segment_plane(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450) -> tuple[list, np.ndarray]:
