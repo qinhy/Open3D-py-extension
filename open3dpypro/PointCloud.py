@@ -230,7 +230,10 @@ class PointCloudSelections(PointCloudBase):
         return self.select_by_bool(in_box,invert=invert)
     
     def _bool2index(self, bools: np.ndarray, invert: bool = False) -> np.ndarray:
-        return np.where(bools if not invert else not bools)[0]
+        bools = np.asarray(bools)
+        if invert:
+            bools = np.logical_not(bools)
+        return np.where(bools)[0]
 
     def select_by_bool(self, bools: np.ndarray, invert: bool = False):
         return self._select_by_idx(self._bool2index(bools),invert=invert)
@@ -280,13 +283,9 @@ class PointCloudSelections(PointCloudBase):
         if type(thickness) is tuple:
             res = (p @ abc + d)/(a**2+b**2+c**2)**0.5
             res =  np.logical_and(res > thickness[0], res < thickness[1])
-            if invert:
-                res = np.logical_not(res)
         else :
             res = (np.abs(p @ abc + d)/(a**2+b**2+c**2)**0.5) < thickness
-            if invert:
-                res = np.logical_not(res)
-        return self._bool2index(res)
+        return self._bool2index(res, invert=invert)
 
     def select_by_plane(self, model: np.ndarray, thickness: float = 0.03, invert: bool = False):
         return self._select_by_idx(self.get_index_by_plane(model,thickness),invert=invert)
