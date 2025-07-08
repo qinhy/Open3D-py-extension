@@ -8,7 +8,7 @@ import json
 import math
 from multiprocessing import shared_memory
 import multiprocessing
-from typing import List
+from typing import Callable, List, Optional
 
 # ===============================
 # Third-Party Library Imports
@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 # Custom Modules
 # ===============================
 from .PointCloudMat import PointCloudMatInfo, PointCloudMatProcessor, PointCloudMat, ShapeType
-from .PointCloud import PointCloudBase
+from .PointCloud import PointCloud, PointCloudBase, PointCloudSelections
 from .shmIO import NumpyFloat32SharedMemoryStreamIO
 
 logger = print
@@ -86,6 +86,71 @@ class Processors:
                     if isinstance(pcd, torch.Tensor):
                         pcd = pcd.clone()
                 res.append(pcd)
+            return res
+
+    class PlaneDetection(PointCloudMatProcessor):
+        title:str='plane_detection'
+        distance_threshold: float = 0.01
+        arange: bool = False
+        voxel_down_sample:float=0.01
+
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_ndarray()
+
+        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                if not self.arange:
+                    z_mean = pcd[:,2].mean()
+                    z_min = pcd[:,2].min()
+                    
+                    lower,upper = z_mean,z_min
+                else:
+                    lower,upper = self.arange
+
+                if lower>upper:
+                    lower,upper = upper,lower
+                pch = PointCloud(pcd)
+                pch = pch.select_by_bool( np.logical_and(lower<pcd[:,2],pcd[:,2]<upper) )
+                pch = pch.voxel_down_sample(self.voxel_down_sample)
+                model,planeidx = pch.segment_plane(
+                    thickness=self.distance_threshold,ransac_n=3,num_iterations=450)
+                res.append(model)
+            meta[self.uuid]=res
+            return pcds_data
+
+    class PlaneNormalize(PointCloudMatProcessor):
+        title:str='plane_normalize'
+        detection_uuid:str
+
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_ndarray()
+
+        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            models = meta[self.detection_uuid]
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                model = models[i]
+                pch,T = PointCloud(pcd).rotate_to_plane(model)
+                self.forward_T[i] = T.tolist()
+                res.append(pch.get_points())
+            return res
+
+    class Lambda(PointCloudMatProcessor):
+        title:str='lambda'
+        _forward_raw:Callable = None
+
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_ndarray()
+
+        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            models = meta[self.detection_uuid]
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                model = models[i]
+                pch,T = PointCloud(pcd).rotate_to_plane(model)
+                self.forward_T[i] = T.tolist()
+                res.append(pch.get_points())
             return res
         
     class ZDepthViewer(PointCloudMatProcessor):

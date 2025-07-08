@@ -292,6 +292,8 @@ class PointCloudMatProcessor(BaseModel):
     num_gpus: int = 0
     _enable: bool = True
 
+    forward_T:List[ List[List[float]] ]=[]
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def print(self, *args):
@@ -347,6 +349,7 @@ class PointCloudMatProcessor(BaseModel):
             input_mats[i] = pcd
 
         self.input_mats = input_mats
+        self.forward_T  = [np.eye(4).tolist() for i in self.input_mats]
         if run:
             return self(self.input_mats, meta)
         return self.input_mats

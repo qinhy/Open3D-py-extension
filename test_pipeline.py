@@ -32,9 +32,13 @@ def test1():
                             sources=['./data/bunny.npy'],
                             shape_types=[pro3d.ShapeType.XYZ])
     print(gen)
+    
+    pld = pro3d.processors.Processors.PlaneDetection()
     pipes = [      
-        pro3d.processors.Processors.RandomSample(),
+        pro3d.processors.Processors.RandomSample(n_samples=10000),
         pro3d.processors.Processors.CPUNormals(),
+        pld,
+        pro3d.processors.Processors.PlaneNormalize(detection_uuid=pld.uuid),
         pro3d.processors.Processors.ZDepthViewer(),
     ]
     pro3d.processors.PointCloudMatProcessors.validate_once(gen,pipes)
