@@ -1,0 +1,14 @@
+[project]
+name = "open3d-py-extension"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "laspy>=2.6.1",
+    "open3d>=0.19.0",
+    "opencv-python>=4.12.0.88",
+    "pydantic>=2.11.7",
+    "pye57>=0.4.17",
+    "torch>=2.7.1",
+]

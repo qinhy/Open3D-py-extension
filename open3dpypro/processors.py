@@ -8,12 +8,7 @@ import json
 import math
 from multiprocessing import shared_memory
 import multiprocessing
-import os
-import queue
-import threading
-import time
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
-import uuid
+from typing import List
 
 # ===============================
 # Third-Party Library Imports
@@ -22,9 +17,7 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision
 from pydantic import BaseModel, Field
-from PIL import Image
 
 # ===============================
 # Ultralytics YOLO Imports
