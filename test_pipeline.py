@@ -35,26 +35,25 @@ def test1():
                             sources=['../test.npy'],
                             shape_types=[pro3d.ShapeType.XYZ])
     print(gen)
-
     
-    def filterNz(pcds_data, pcds_info, meta):
-        res = []
-        for i,pcd in enumerate(pcds_data):
-            pcd = pcd[np.abs(pcd[:,5])>0.5]
-            res.append(pcd)
-        return res
-    ld_filterNz = pro3d.processors.Processors.Lambda()
-    ld_filterNz._forward_raw=filterNz
+    # def filterNz(pcds_data, pcds_info, meta):
+    #     res = []
+    #     for i,pcd in enumerate(pcds_data):
+    #         pcd = pcd[np.abs(pcd[:,5])>0.5]
+    #         res.append(pcd)
+    #     return res
+    # ld_filterNz = pro3d.processors.Processors.Lambda()
+    # ld_filterNz._forward_raw=filterNz
 
 
-    def filterz(pcds_data, pcds_info, meta):
-        res = []
-        for i,pcd in enumerate(pcds_data):
-            pcd = pcd[pcd[:,2]>(pcd[:,2].mean()*1.2)]
-            res.append(pcd)
-        return res
-    ld_filterz = pro3d.processors.Processors.Lambda()
-    ld_filterz._forward_raw=filterz
+    # def filterz(pcds_data, pcds_info, meta):
+    #     res = []
+    #     for i,pcd in enumerate(pcds_data):
+    #         pcd = pcd[pcd[:,2]>(pcd[:,2].mean()*1.2)]
+    #         res.append(pcd)
+    #     return res
+    # ld_filterz = pro3d.processors.Processors.Lambda()
+    # ld_filterz._forward_raw=filterz
 
     pld = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.05,alpha=0.1)
     n_samples=100_000
@@ -62,13 +61,9 @@ def test1():
         pro3d.processors.Processors.RandomSample(n_samples=n_samples),
         pro3d.processors.Processors.NumpyToTorch(),
         pro3d.processors.Processors.VoxelDownsample(voxel_size=0.05),
-        # # pro3d.processors.Processors.CPUNormals(),
-        # # ld_filterNz,
         pld,
         pro3d.processors.Processors.TorchToNumpy(),
         pro3d.processors.Processors.PlaneNormalize(detection_uuid=pld.uuid),
-        # # pro3d.processors.Processors.RandomSample(n_samples=n_samples//10),
-        # ld_filterz,
         # pro3d.processors.Processors.ZDepthViewer(grid_size=128),
         pro3d.processors.Processors.O3DStreamViewer(),
     ]
