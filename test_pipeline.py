@@ -56,20 +56,23 @@ def test1():
     ld_filterz = pro3d.processors.Processors.Lambda()
     ld_filterz._forward_raw=filterz
 
-    pld = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.01)
+    pld = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.01,alpha=0.1)
     n_samples=100_000
-    pipes = [      
+    pipes = [
         pro3d.processors.Processors.RandomSample(n_samples=n_samples),
-        # pro3d.processors.Processors.RemoveStatisticalOutlier(),
+        pro3d.processors.Processors.NumpyToTorch(),
+        # # pro3d.processors.Processors.RemoveStatisticalOutlier(),
         pro3d.processors.Processors.VoxelDownsample(voxel_size=0.05),
-        # pro3d.processors.Processors.CPUNormals(),
-        # ld_filterNz,
+        # # pro3d.processors.Processors.CPUNormals(),
+        # # ld_filterNz,
         pld,
+        pro3d.processors.Processors.TorchToNumpy(),
         pro3d.processors.Processors.PlaneNormalize(detection_uuid=pld.uuid),
-        # pro3d.processors.Processors.RandomSample(n_samples=n_samples//10),
-        # ld_filterz,
-        # pro3d.processors.Processors.RemoveStatisticalOutlier(),
-        pro3d.processors.Processors.ZDepthViewer(grid_size=128),
+        # # pro3d.processors.Processors.RandomSample(n_samples=n_samples//10),
+        # # ld_filterz,
+        # # pro3d.processors.Processors.RemoveStatisticalOutlier(),
+        # pro3d.processors.Processors.ZDepthViewer(grid_size=128),
+        pro3d.processors.Processors.O3DStreamViewer(),
     ]
     pro3d.processors.PointCloudMatProcessors.validate_once(gen,pipes)
     while len(pipes)>0:
