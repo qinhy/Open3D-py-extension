@@ -44,10 +44,10 @@ class PointCloudMatGenerator(BaseModel):
             raise ValueError("Empty frame_generators.")
 
         if not self.output_mats:
-            self.output_mats = [
-                PointCloudMat(shape_type=shape_type).build(next(gen))
-                for gen, shape_type in zip(self._frame_generators, self.shape_types)
-            ]
+            self.output_mats = []
+            for i,gen in enumerate(self._frame_generators):
+                outmat = PointCloudMat(shape_type=self.shape_types[i]).build(next(gen))
+                self.output_mats.append(outmat)
 
         for mat in self.output_mats:
             mat.shmIO_mode = self.shmIO_mode
@@ -80,7 +80,7 @@ class PointCloudMatGenerator(BaseModel):
                     try:
                         getattr(res, method)()
                     except Exception as e:
-                        print(f"Error during {method} on {res}: {e}")
+                        logger(f"Error during {method} on {res}: {e}")
         self._resources.clear()
 
     def create_frame_generator(self, idx, source):

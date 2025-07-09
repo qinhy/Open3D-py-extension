@@ -34,7 +34,8 @@ class ShapeType(str, enum.Enum):
     def contains_normals(self) -> bool:
         """Check if this shape type includes normals (by suffix 'N')."""
         return self.value.endswith('N')
-
+    def add_normals(self) -> 'ShapeType':
+        return ShapeType(self.value+'N')
 
 # --- Color Type (Image-Specific) ---
 class ColorDataType(str, enum.Enum):
@@ -70,13 +71,9 @@ class PointCloudMatInfo(BaseModel):
         self.uuid = f'{self.__class__.__name__}:{uuid.uuid4()}'
         return super().model_post_init(context)
 
-    def build(self, pcd_data: Union[np.ndarray, torch.Tensor], shape_type: Union[str, ShapeType]):
+    def build(self, pcd_data: Union[np.ndarray, torch.Tensor]):
         # Parse shape_type to Enum
-        try:
-            shape_type = ShapeType(shape_type)
-        except ValueError:
-            raise ValueError(f"Invalid shape type: {shape_type}. Must be one of {[s.value for s in ShapeType]}")
-
+        shape_type = self.shape_type
         self.type = type(pcd_data).__name__
 
         if isinstance(pcd_data, np.ndarray):
@@ -122,8 +119,8 @@ class PointCloudMatInfo(BaseModel):
         return self
 
 class PointCloudMat(BaseModel):
+    shape_type: ShapeType
     info: Optional[PointCloudMatInfo] = None
-    shape_type: Union[str, ShapeType]
     _pcd_data: np.ndarray | torch.Tensor = None
 
     shmIO_mode: Literal[False, 'writer', 'reader'] = False
@@ -182,7 +179,7 @@ class PointCloudMat(BaseModel):
         return super().model_post_init(context)
 
     def build(self, pcd_data: Union[np.ndarray, torch.Tensor], info: Optional[PointCloudMatInfo] = None):
-        self.info = info or PointCloudMatInfo().build(pcd_data, shape_type=self.shape_type)
+        self.info = info or PointCloudMatInfo(shape_type=self.shape_type).build(pcd_data)
         self._pcd_data = pcd_data
         return self
 

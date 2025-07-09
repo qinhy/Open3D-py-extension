@@ -56,13 +56,21 @@ class Processors:
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
             pcd.require_ndarray()
             self.input_shape_types.append(pcd.shape_type)
+        
+        def build_out_mats(self, validated_pcds: List[PointCloudMat], converted_raw_pcds):
+            self.out_mats = [
+                PointCloudMat(shape_type=old.info.shape_type.add_normals()).build(pcd)
+                for old, pcd in zip(validated_pcds, converted_raw_pcds)
+            ]
+            return self.out_mats
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            res = []
             for i,pcd in enumerate(pcds_data):
                 if not self.input_shape_types[i].contains_normals():
                     ns = PointCloudBase(pcd[:,:3]).estimate_normals().get_normals()
-                    pcd = np.hstack([pcd,ns])
-            return pcds_data
+                    res.append(np.hstack([pcd,ns]))
+            return res
 
     class RandomSample(PointCloudMatProcessor):
         title:str='rand_sample'
@@ -87,7 +95,37 @@ class Processors:
                         pcd = pcd.clone()
                 res.append(pcd)
             return res
+        
+    class VoxelDownsample(PointCloudMatProcessor):
+        title:str='voxel_sample'
+        voxel_size:float=0.1
 
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_ndarray()
+
+        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                pch,idxmat,vec = PointCloud(pcd[:,:3]).voxel_down_sample_and_trace(self.voxel_size)
+                res.append(pcd[idxmat.max(1)])
+            return res
+
+    class RemoveStatisticalOutlier(PointCloudMatProcessor):
+        title:str='remove_statistical_outlier'
+        nb_neighbors: int = 20
+        std_ratio: float = 2.0
+        print_progress: bool = False
+        
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_ndarray()
+
+        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                pch,idxmat = PointCloud(pcd[:,:3]).remove_statistical_outlier(self.nb_neighbors,self.std_ratio)
+                res.append(pcd[idxmat])
+            return res
+        
     class PlaneDetection(PointCloudMatProcessor):
         title:str='plane_detection'
         distance_threshold: float = 0.01
@@ -110,7 +148,7 @@ class Processors:
 
                 if lower>upper:
                     lower,upper = upper,lower
-                pch = PointCloud(pcd)
+                pch = PointCloud(pcd[:,:3])
                 pch = pch.select_by_bool( np.logical_and(lower<pcd[:,2],pcd[:,2]<upper) )
                 pch = pch.voxel_down_sample(self.voxel_down_sample)
                 model,planeidx = pch.segment_plane(
@@ -131,27 +169,20 @@ class Processors:
             res = []
             for i,pcd in enumerate(pcds_data):
                 model = models[i]
-                pch,T = PointCloud(pcd).rotate_to_plane(model)
+                pch,T = PointCloud(pcd[:,:3]).rotate_to_plane(model)
                 self.forward_T[i] = T.tolist()
-                res.append(pch.get_points())
+                res.append(np.hstack([pch.get_points(),pcd[:,3:]]))
             return res
 
     class Lambda(PointCloudMatProcessor):
         title:str='lambda'
-        _forward_raw:Callable = None
+        _forward_raw:Callable = lambda pcds_data, pcds_info, meta:None
 
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
             pcd.require_ndarray()
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
-            models = meta[self.detection_uuid]
-            res = []
-            for i,pcd in enumerate(pcds_data):
-                model = models[i]
-                pch,T = PointCloud(pcd).rotate_to_plane(model)
-                self.forward_T[i] = T.tolist()
-                res.append(pch.get_points())
-            return res
+            return self._forward_raw(pcds_data,pcds_info,meta)
         
     class ZDepthViewer(PointCloudMatProcessor):
         title: str = 'z_depth_viewer'
@@ -178,7 +209,7 @@ class Processors:
                 y_min, y_max = y.min(), y.max()
 
                 if x_max - x_min < 1e-5 or y_max - y_min < 1e-5:
-                    print(f"Skipping point cloud {i}: flat x or y range.")
+                    logger(f"Skipping point cloud {i}: flat x or y range.")
                     continue
 
                 x_norm = (x - x_min) / (x_max - x_min)

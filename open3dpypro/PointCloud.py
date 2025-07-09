@@ -338,7 +338,7 @@ class PointCloudUtility(PointCloudSelections):
     def voxel_down_sample_and_trace(self, voxel_size: float):
         pcd,idxmat,vec = self.pcd.voxel_down_sample_and_trace(voxel_size=voxel_size,
                         min_bound=self.pcd.get_min_bound(),max_bound=self.pcd.get_max_bound(), approximate_class=False)
-        return self._select_by_idx(idxmat),idxmat,vec
+        return self._select_by_idx(idxmat.max(1)),idxmat,vec
     
     def random_down_sample(self, down_sample_ratio: float = 0.1):
         if down_sample_ratio<=0 or down_sample_ratio > 1:
@@ -368,8 +368,8 @@ class PointCloudUtility(PointCloudSelections):
             return self.__class__(o3d.io.read_triangle_mesh(path).sample_points_uniformly(number_of_points=sample_points_uniformly))
 
     def remove_statistical_outlier(self, nb_neighbors: int = 20, std_ratio: float = 2.0, print_progress: bool = False):
-        res = self.pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio, print_progress=print_progress)
-        return self._select_by_idx(res[1]),res[1]
+        idx = self.pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio, print_progress=print_progress)[1]
+        return self._select_by_idx(idx),idx
     
     def merge_pcds(self, raw_pcds: np.ndarray, rgb: bool = False, intensity: bool = False, normals: bool = False, labels: bool = False):
         pcds = [p if hasattr(p,'pcd') else self.__class__(p) for p in raw_pcds]        
