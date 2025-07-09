@@ -333,6 +333,7 @@ class PointCloudMatProcessor(BaseModel):
         raise NotImplementedError()
 
     def validate(self, pcds: List[PointCloudMat], meta: Dict = {}, run=True):
+        self.input_mats = pcds
         input_mats = [None] * len(pcds)
         for i, pcd in enumerate(pcds):
             self.validate_pcd(i, pcd)
