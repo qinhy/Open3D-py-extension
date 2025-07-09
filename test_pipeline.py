@@ -32,7 +32,7 @@ def measure_fps(gen, test_duration=15, func = lambda imgs:None,
 def test1():
     gen = pro3d.generator.NumpyRawFrameFileGenerator(
                             # sources=['./data/bunny.npy'],
-                            sources=['./test.npy'],
+                            sources=['../test.npy'],
                             shape_types=[pro3d.ShapeType.XYZ])
     print(gen)
 
