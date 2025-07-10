@@ -126,19 +126,67 @@ class Processors:
                                 
                 if pcd.info.device=='cpu':
                     def cpu_model(pcd:np.ndarray,n_samples=self.n_samples,copy_pcd=self.copy_pcd):
-                        idx = np.random.randint(0,len(pcd),(n_samples,))
-                        pcd = pcd[idx]
-                        if copy_pcd: return pcd.copy()
+                        if len(pcd)>n_samples:
+                            idx = np.random.randint(0,len(pcd),(n_samples,))
+                            pcd = pcd[idx]
+                            if copy_pcd: return pcd.copy()
                         return pcd
                     self._models.append(cpu_model)
 
                 elif 'cuda' in pcd.info.device:                
                     def cuda_model(pcd:torch.Tensor,device=self.num_devices[i%self.num_gpus],
                                    n_samples=self.n_samples,copy_pcd=self.copy_pcd):
-                        idx = torch.randint(0,len(pcd),(n_samples,),device=device)
-                        pcd = pcd[idx]
-                        if copy_pcd: return pcd.clone()
+                        if len(pcd)>n_samples:
+                            idx = torch.randint(0,len(pcd),(n_samples,),device=device)
+                            pcd = pcd[idx]
+                            if copy_pcd: return pcd.clone()
                         return pcd
+                    self._models.append(cuda_model)
+                
+                else:
+                    raise ValueError('not support')
+
+        def model_post_init(self, context):
+            self.build()
+            return super().model_post_init(context)
+
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            if pcd.is_ndarray():
+                pcd.require_ndarray()
+                self.build()
+            if pcd.is_torch_tensor():
+                pcd.require_torch_float()
+                self.devices_info()
+                self.build()
+
+        def forward_raw(self, pcds_data: List[np.ndarray|torch.Tensor], 
+                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray|torch.Tensor]:
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                model = self._models[i]
+                res.append(model(pcd))
+            return res
+        
+    class RadiusSelection(PointCloudMatProcessor):
+        title:str='radius_selection'
+        radius:float = 5.0
+        _models:list = []
+
+        def build(self):            
+            for i,pcd in enumerate(self.input_mats):
+                                
+                if pcd.info.device=='cpu':
+                    def cpu_model(pcd:np.ndarray,r=self.radius):
+                        pch = PointCloud(pcd[:,:3]).select_by_radius(r=r)
+                        return pch.get_points()
+                    self._models.append(cpu_model)
+
+                elif 'cuda' in pcd.info.device:                
+                    def cuda_model(pcd:torch.Tensor,r=self.radius):
+                        xyz = pcd[:, :3]
+                        mask = (xyz.norm(dim=1) <= r)
+                        return pcd[mask]
+
                     self._models.append(cuda_model)
                 
                 else:
@@ -347,10 +395,11 @@ class Processors:
                 valid_mask = norms[:, 0] > 1e-6
 
                 normals = normals / norms.clamp(min=1e-6)
-                ds = -torch.einsum('bi,bi->b', normals, p1)
+                ds = -torch.einsum("bi,bi->b", normals, p1)
 
-                # Flip to +Z
-                flip_mask = normals[:, 2] < 0
+                # Flip normals toward sensor center
+                dot_to_center = ds
+                flip_mask = dot_to_center < 0
                 normals[flip_mask] = -normals[flip_mask]
                 ds[flip_mask] = -ds[flip_mask]
 
@@ -383,7 +432,18 @@ class Processors:
                             pch = pch.select_by_bool( np.logical_and(lower<pcd[:,2],pcd[:,2]<upper) )
                         plane_model,_ = pch.segment_plane(
                             thickness=self.distance_threshold,ransac_n=3,num_iterations=self.num_iterations)
-                        return np.asarray(plane_model)
+                        
+                        plane_model = np.asarray(plane_model)
+                        n = plane_model[:3]
+                        d = plane_model[3]
+                        # Compute point on plane
+                        point_on_plane = -d * n
+                        # Vector to sensor center
+                        v = np.zeros(3) - point_on_plane
+                        # Flip if needed
+                        if np.dot(n, v) < 0:
+                            plane_model = -plane_model
+                        return plane_model
                     self._models.append(cpu_model)
 
                 elif 'cuda' in pcd.info.device:                
@@ -426,6 +486,7 @@ class Processors:
     class PlaneNormalize(PointCloudMatProcessor):
         title:str='plane_normalize'
         detection_uuid:str
+        filter_pcd:bool=False
 
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
             pcd.require_ndarray()
@@ -463,51 +524,53 @@ class Processors:
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo] = [], meta={}) -> List[np.ndarray]:
             for i, pcd in enumerate(pcds_data):
-                # Use XYZ coordinates only
-                xyz = pcd[:, :3]
-                # Extract Z (depth) channel
-                x = xyz[:, 0]
-                y = xyz[:, 1]
-                z = xyz[:, 2]
+                z_img_color = np.zeros((self.grid_size,self.grid_size,3),dtype=np.uint8)
 
-                # Normalize x and y to [0, 1]
-                x_min, x_max = x.min(), x.max()
-                y_min, y_max = y.min(), y.max()
+                if len(pcd)>0:
+                    # Use XYZ coordinates only
+                    xyz = pcd[:, :3]
+                    # Extract Z (depth) channel
+                    x = xyz[:, 0]
+                    y = xyz[:, 1]
+                    z = xyz[:, 2]
 
-                if x_max - x_min < 1e-5 or y_max - y_min < 1e-5:
-                    logger(f"Skipping point cloud {i}: flat x or y range.")
-                    continue
+                    # Normalize x and y to [0, 1]
+                    x_min, x_max = x.min(), x.max()
+                    y_min, y_max = y.min(), y.max()
 
-                x_norm = (x - x_min) / (x_max - x_min)
-                y_norm = (y - y_min) / (y_max - y_min)
+                    if x_max - x_min < 1e-5 or y_max - y_min < 1e-5:
+                        logger(f"Skipping point cloud {i}: flat x or y range.")
+                        continue
 
-                # Map to grid indices
-                xi = np.clip((x_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
-                yi = np.clip((y_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
+                    x_norm = (x - x_min) / (x_max - x_min)
+                    y_norm = (y - y_min) / (y_max - y_min)
 
-                # Initialize grid with NaNs (or large value)
-                z_grid = np.full((self.grid_size, self.grid_size), np.nan, dtype=np.float32)
+                    # Map to grid indices
+                    xi = np.clip((x_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
+                    yi = np.clip((y_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
 
-                # Assign z to grid cells — here, use last point if collisions
-                z_grid[yi, xi] = z
+                    # Initialize grid with NaNs (or large value)
+                    z_grid = np.full((self.grid_size, self.grid_size), np.nan, dtype=np.float32)
 
-                # Fill NaNs with min value (optional, or use interpolation)
-                if np.isnan(z_grid).any():
-                    z_min = np.nanmin(z_grid)
-                    z_grid = np.where(np.isnan(z_grid), z_min, z_grid)
+                    # Assign z to grid cells — here, use last point if collisions
+                    z_grid[yi, xi] = z
 
-                # Normalize z to [0, 255]
-                z_min, z_max = z_grid.min(), z_grid.max()
-                if z_max - z_min < 1e-5:
-                    z_norm = np.zeros_like(z_grid)
-                else:
-                    z_norm = (z_grid - z_min) / (z_max - z_min)
+                    # Fill NaNs with min value (optional, or use interpolation)
+                    if np.isnan(z_grid).any():
+                        z_min = np.nanmin(z_grid)
+                        z_grid = np.where(np.isnan(z_grid), z_min, z_grid)
 
-                z_img = (z_norm * 255).astype(np.uint8)
+                    # Normalize z to [0, 255]
+                    z_min, z_max = z_grid.min(), z_grid.max()
+                    if z_max - z_min < 1e-5:
+                        z_norm = np.zeros_like(z_grid)
+                    else:
+                        z_norm = (z_grid - z_min) / (z_max - z_min)
 
-                # Optional: apply colormap
-                z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
-                z_img_color[z_img==0] = self.bg
+                    z_img = (z_norm * 255).astype(np.uint8)
+                    # Optional: apply colormap
+                    z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
+                    z_img_color[z_img==0] = self.bg
 
                 # Show image
                 cv2.imshow(f"Z Depth Viewer {i}", z_img_color)

@@ -128,9 +128,15 @@ class NumpyRawFrameFileGenerator(PointCloudMatGenerator):
     def create_frame_generator(self, idx,source):
         arr = np.load(source)
         def gen(arr=arr):
+            cnt=0
             while True:
-                idx = np.random.choice(len(arr))
-                yield np.ascontiguousarray(arr[idx])
+                # idx = np.random.choice(len(arr))
+                # yield np.ascontiguousarray(arr[20])
+                idx = cnt%len(arr)
+                d = arr[idx]
+                d = d[~np.isnan(d.sum(1))]
+                yield np.ascontiguousarray(d)
+                cnt+=1
         return gen()
 
 class PointCloudMatGenerators(BaseModel):
