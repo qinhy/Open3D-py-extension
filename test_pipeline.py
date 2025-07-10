@@ -68,12 +68,12 @@ def test1():
                             shape_types=[pro3d.ShapeType.XYZ])
     
     plane_det = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.05,alpha=0.1)
-    n_samples=10_000
+    n_samples=100_000
     pipes = [
         pro3d.processors.Processors.RandomSample(n_samples=n_samples),
         pro3d.processors.Processors.NumpyToTorch(),
         pro3d.processors.Processors.RadiusSelection(radius=3.0),
-        pro3d.processors.Processors.VoxelDownsample(voxel_size=0.05),
+        pro3d.processors.Processors.VoxelDownsample(voxel_size=0.025),
         plane_det,
         pro3d.processors.Processors.TorchToNumpy(),
         pro3d.processors.Processors.PlaneNormalize(detection_uuid=plane_det.uuid),
@@ -81,7 +81,7 @@ def test1():
 
         # vis only
         ld_centerz,
-        pro3d.processors.Processors.ZDepthViewer(grid_size=128),
+        pro3d.processors.Processors.ZDepthViewer(grid_size=100,img_size=256),
         pro3d.processors.Processors.O3DStreamViewer(),
     ]
     pro3d.processors.PointCloudMatProcessors.validate_once(gen,pipes)

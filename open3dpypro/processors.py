@@ -515,6 +515,7 @@ class Processors:
         title: str = 'z_depth_viewer'
         bg:tuple[int,int,int] = (125,125,125)
         grid_size: int = 256  # Grid resolution (e.g., 256 x 256)
+        img_size:int=0
 
         def validate_pcd(self, pcd_idx, pcd: PointCloudMat):
             if pcd.is_ndarray():
@@ -530,20 +531,23 @@ class Processors:
                     # Use XYZ coordinates only
                     xyz = pcd[:, :3]
                     # Extract Z (depth) channel
-                    x = xyz[:, 0]
-                    y = xyz[:, 1]
-                    z = xyz[:, 2]
+                    x = xyz[:, 0].copy()
+                    x -= x.min()
+                    y = xyz[:, 1].copy()
+                    y -= y.min()
+                    z = xyz[:, 2].copy()
 
                     # Normalize x and y to [0, 1]
                     x_min, x_max = x.min(), x.max()
                     y_min, y_max = y.min(), y.max()
+                    xy_min, xy_max = min(x_min,y_min), max(x_max,y_max)
 
                     if x_max - x_min < 1e-5 or y_max - y_min < 1e-5:
                         logger(f"Skipping point cloud {i}: flat x or y range.")
                         continue
 
-                    x_norm = (x - x_min) / (x_max - x_min)
-                    y_norm = (y - y_min) / (y_max - y_min)
+                    x_norm = (x - xy_min) / (xy_max - xy_min)
+                    y_norm = (y - xy_min) / (xy_max - xy_min)
 
                     # Map to grid indices
                     xi = np.clip((x_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
@@ -571,6 +575,8 @@ class Processors:
                     # Optional: apply colormap
                     z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
                     z_img_color[z_img==0] = self.bg
+                    if self.img_size:
+                        z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
 
                 # Show image
                 cv2.imshow(f"Z Depth Viewer {i}", z_img_color)
