@@ -29,29 +29,7 @@ def measure_fps(gen, test_duration=15, func = lambda imgs:None,
     print(f"Test completed: Average FPS = {(frame_count/(time.time()-start_time)):.2f}")
 
 
-def test1():
-    
-    # def filterNz(pcds_data, pcds_info, meta):
-    #     res = []
-    #     for i,pcd in enumerate(pcds_data):
-    #         pcd = pcd[np.abs(pcd[:,5])>0.5]
-    #         res.append(pcd)
-    #     return res
-    # ld_filterNz = pro3d.processors.Processors.Lambda()
-    # ld_filterNz._forward_raw=filterNz
-
-
-    def filterz(pcds_data, pcds_info, meta):
-        res = []
-        for i,pcd in enumerate(pcds_data):
-            z = pcd[:,2]
-            zmean = z.mean()
-            pcd = pcd[np.logical_and( z>(zmean-0.5) , z<(zmean+0.5) )]
-            res.append(pcd)
-        return res
-    ld_filterz = pro3d.processors.Processors.Lambda()
-    ld_filterz._forward_raw=filterz
-
+def test1(sources):
 
     def centerz(pcds_data, pcds_info, meta):
         res = []
@@ -62,25 +40,50 @@ def test1():
     ld_centerz = pro3d.processors.Processors.Lambda()
     ld_centerz._forward_raw=centerz
 
-    gen = pro3d.generator.NumpyRawFrameFileGenerator(
-                            # sources=['./data/bunny.npy'],
-                            sources=['../zed_point_clouds.npy'],
+    gen = pro3d.generator.NumpyRawFrameFileGenerator(sources=sources,
                             shape_types=[pro3d.ShapeType.XYZ])
     
+    def filterz(pcds_data, pcds_info, meta):
+        res = []
+        for i,pcd in enumerate(pcds_data):
+            z = pcd[:,2]
+            zmedian = np.median(z)
+            # pcd = pcd[np.logical_and( z>(zmean-0.5) , z<(zmean+0.5) )]
+            pcd = pcd[z<zmedian]
+            res.append(pcd)
+        return res
+    ld_filterz = pro3d.processors.Processors.Lambda()
+    ld_filterz._forward_raw=filterz
+    
+    def filterNz(pcds_data, pcds_info, meta):
+        res = []
+        for i,pcd in enumerate(pcds_data):
+            pcd = pcd[np.abs(pcd[:,5])<0.95]
+            res.append(pcd)
+        return res
+    ld_filterNz = pro3d.processors.Processors.Lambda()
+    ld_filterNz._forward_raw=filterNz
+
     plane_det = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.05,alpha=0.1)
     n_samples=100_000
     pipes = [
         pro3d.processors.Processors.RandomSample(n_samples=n_samples),
         pro3d.processors.Processors.NumpyToTorch(),
+        
+        # GPU
         pro3d.processors.Processors.RadiusSelection(radius=3.0),
         pro3d.processors.Processors.VoxelDownsample(voxel_size=0.025),
         plane_det,
-        pro3d.processors.Processors.TorchToNumpy(),
         pro3d.processors.Processors.PlaneNormalize(detection_uuid=plane_det.uuid),
-        ld_filterz,
+        pro3d.processors.Processors.TorchToNumpy(),
+        # end GPU
 
-        # vis only
+
         ld_centerz,
+        ld_filterz,
+        pro3d.processors.Processors.CPUNormals(),
+        ld_filterNz,
+
         pro3d.processors.Processors.ZDepthViewer(grid_size=100,img_size=256),
         pro3d.processors.Processors.O3DStreamViewer(),
     ]
@@ -88,11 +91,16 @@ def test1():
     while len(pipes)>0:
         measure_fps(gen, func=lambda imgs:pro3d.processors.PointCloudMatProcessors.run_once(
                 imgs,{},pipes),
-                test_duration=100,
+                test_duration=50,
                 title=f"#### profile ####\n{'  ->  '.join([f.title for f in pipes])}")
+        return
         pipes.pop()
 
 
 
 if __name__ == "__main__":
-    test1()
+    for s in [
+               ['../zed_point_clouds.npy'],
+               ['./data/bunny.npy'],
+            ]:
+        test1(s)

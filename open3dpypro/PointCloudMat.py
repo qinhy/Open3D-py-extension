@@ -2,7 +2,7 @@
 # Standard Library Imports
 import enum
 import json
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import uuid
 
 # Third-Party Library Imports
@@ -291,7 +291,39 @@ class PointCloudMatProcessor(BaseModel):
 
     forward_T:List[ List[List[float]] ]=[]
 
+    _mat:Callable = lambda pylist,dtype,device=None: NotImplementedError()
+    _eye:Callable = lambda size,dtype,device=None: NotImplementedError()
+    _ones:Callable = lambda shape,dtype,device=None: NotImplementedError()
+    _hstack:Callable = lambda arrays: NotImplementedError()
+    _norm:Callable = lambda x: NotImplementedError()
+    _dot:Callable = lambda a,b: NotImplementedError()
+    _cross:Callable = lambda a,b: NotImplementedError()
+    _matmul:Callable = lambda a,b: NotImplementedError()
+    _to_numpy:Callable = lambda x: NotImplementedError()
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def init_common_utility_methods(self,pcd:PointCloudMat):
+        if pcd.is_ndarray():
+            self._mat = lambda pylist,dtype,device=None: np.array(pylist,dtype=dtype)
+            self._eye = lambda size,dtype,device=None: np.eye(size, dtype=dtype)
+            self._ones = lambda shape,dtype,device=None: np.ones(shape, dtype=dtype)
+            self._hstack = lambda arrays: np.hstack(arrays)
+            self._norm = lambda x: np.linalg.norm(x)
+            self._dot = lambda a,b: np.dot(a, b)
+            self._cross = lambda a,b: np.cross(a, b)
+            self._matmul = lambda a,b: a @ b
+            self._to_numpy = lambda x: x
+        if pcd.is_torch_tensor():
+            self._mat = lambda pylist,dtype,device=None: torch.tensor(pylist,dtype=dtype,device=device)
+            self._eye = lambda size,dtype,device=None: torch.eye(size, dtype=dtype, device=device)
+            self._ones = lambda shape,dtype,device=None: torch.ones(shape, dtype=dtype, device=device)
+            self._hstack = lambda arrays: torch.cat(arrays, dim=1)
+            self._norm = lambda x: torch.norm(x)
+            self._dot = lambda a,b: torch.dot(a, b)
+            self._cross = lambda a,b: torch.cross(a, b)
+            self._matmul = lambda a,b: torch.matmul(a, b)
+            self._to_numpy = lambda x: x.cpu().numpy()
 
     def print(self, *args):
         print(f'##############[{self.uuid}]#################')

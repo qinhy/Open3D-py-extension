@@ -8,7 +8,7 @@ import json
 import math
 from multiprocessing import shared_memory
 import multiprocessing
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 # ===============================
 # Third-Party Library Imports
@@ -482,23 +482,64 @@ class Processors:
                 self.best_planes[i] = (np.asarray(self.best_planes[i])*(1.0-self.alpha)+plane*self.alpha).tolist()
             meta[self.uuid]=self.best_planes
             return pcds_data
-        
+
     class PlaneNormalize(PointCloudMatProcessor):
-        title:str='plane_normalize'
-        detection_uuid:str
-        filter_pcd:bool=False
+        title: str = 'plane_normalize'
+        detection_uuid: str
+        filter_pcd: bool = False
 
-        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
-            pcd.require_ndarray()
+        def validate_pcd(self, idx, pcd):
+            self.init_common_utility_methods(pcd)
 
-        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+        def rotation_matrix_from_vectors(self, vec1, vec2, device=None):
+            a:Union[np.ndarray, torch.Tensor] = vec1 / self._norm(vec1)
+            b = vec2 / self._norm(vec2)
+            v = self._cross(a, b)
+            if self._norm(v) < 1e-6:
+                return self._eye(3, dtype=a.dtype, device=device)
+
+            c = self._dot(a, b)
+            s = self._norm(v)
+            kmat = self._mat([
+                    [0, -v[2], v[1]],
+                    [v[2], 0, -v[0]],
+                    [-v[1], v[0], 0]
+                ], dtype=a.dtype, device=device)
+            return self._eye(3, dtype=a.dtype, device=device) + kmat + self._matmul(kmat, kmat) * ((1 - c) / (s ** 2))
+
+        def rotate_to_plane(self, pcd_data:Union[np.ndarray, torch.Tensor], plane: List[float], device=None):
+            a, b, c, d = plane
+            xyz = pcd_data[:, :3]
+            normal = self._mat([a, b, c], dtype=pcd_data.dtype, device=device)
+            z_axis = self._mat([0, 0, 1], dtype=pcd_data.dtype, device=device)
+
+            R = self.rotation_matrix_from_vectors(normal, z_axis, device)
+            point_on_plane = -d * normal / self._dot(normal, normal)
+            t = -self._matmul(R, point_on_plane)
+
+            T = self._eye(4, dtype=pcd_data.dtype, device=device)
+            T[:3, :3] = R
+            T[:3, 3] = t
+
+            ones_row = self._ones((pcd_data.shape[0], 1), dtype=pcd_data.dtype, device=device)
+            homo = self._hstack([xyz, ones_row])
+            xyz_transformed = self._matmul(T, homo.T).T[:, :3]
+
+            return xyz_transformed, T
+
+        def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], pcds_info: list = [], meta: dict = {}) -> List[Union[np.ndarray, torch.Tensor]]:
             models = meta[self.detection_uuid]
+            self.forward_T = {}
             res = []
-            for i,pcd in enumerate(pcds_data):
-                model = models[i]
-                pch,T = PointCloud(pcd[:,:3]).rotate_to_plane(model)
-                self.forward_T[i] = T.tolist()
-                res.append(np.hstack([pch.get_points(),pcd[:,3:]]))
+
+            for i, pcd in enumerate(pcds_data):
+                device = pcd.device if hasattr(pcd,'device') else None
+
+                xyz, T = self.rotate_to_plane(pcd, models[i], device=device)
+                out = self._hstack([xyz, pcd[:, 3:]]) if pcd.shape[1] > 3 else xyz
+                self.forward_T[i] = self._to_numpy(T).tolist()
+                res.append(out)
+
             return res
 
     class Lambda(PointCloudMatProcessor):
@@ -506,7 +547,7 @@ class Processors:
         _forward_raw:Callable = lambda pcds_data, pcds_info, meta:None
 
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
-            pcd.require_ndarray()
+            pass
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
             return self._forward_raw(pcds_data,pcds_info,meta)
