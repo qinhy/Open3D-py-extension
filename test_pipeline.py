@@ -43,25 +43,25 @@ def test1(sources):
     gen = pro3d.generator.NumpyRawFrameFileGenerator(sources=sources,
                             shape_types=[pro3d.ShapeType.XYZ])
     
+    ld_filterz = pro3d.processors.Processors.Lambda()
     def filterz(pcds_data, pcds_info, meta):
         res = []
         for i,pcd in enumerate(pcds_data):
             z = pcd[:,2]
-            zmedian = np.median(z)
+            zmedian = ld_filterz._median(z)
             # pcd = pcd[np.logical_and( z>(zmean-0.5) , z<(zmean+0.5) )]
             pcd = pcd[z<zmedian]
             res.append(pcd)
         return res
-    ld_filterz = pro3d.processors.Processors.Lambda()
     ld_filterz._forward_raw=filterz
     
+    ld_filterNz = pro3d.processors.Processors.Lambda()
     def filterNz(pcds_data, pcds_info, meta):
         res = []
         for i,pcd in enumerate(pcds_data):
-            pcd = pcd[np.abs(pcd[:,5])<0.95]
+            pcd = pcd[ld_filterNz._abs(pcd[:,5])<0.95]
             res.append(pcd)
         return res
-    ld_filterNz = pro3d.processors.Processors.Lambda()
     ld_filterNz._forward_raw=filterNz
 
     plane_det = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.05,alpha=0.1)
@@ -70,19 +70,19 @@ def test1(sources):
         pro3d.processors.Processors.RandomSample(n_samples=n_samples),
         pro3d.processors.Processors.NumpyToTorch(),
         
-        # GPU
+        #### GPU
         pro3d.processors.Processors.RadiusSelection(radius=3.0),
         pro3d.processors.Processors.VoxelDownsample(voxel_size=0.025),
         plane_det,
         pro3d.processors.Processors.PlaneNormalize(detection_uuid=plane_det.uuid),
-        pro3d.processors.Processors.TorchToNumpy(),
-        # end GPU
-
-
         ld_centerz,
         ld_filterz,
-        pro3d.processors.Processors.CPUNormals(),
+        pro3d.processors.Processors.TorchNormals(k=20),
         ld_filterNz,
+        #### end GPU
+
+        pro3d.processors.Processors.TorchToNumpy(),
+        # pro3d.processors.Processors.CPUNormals(),        
 
         pro3d.processors.Processors.ZDepthViewer(grid_size=100,img_size=256),
         pro3d.processors.Processors.O3DStreamViewer(),

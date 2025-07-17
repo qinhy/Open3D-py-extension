@@ -93,7 +93,7 @@ class Processors:
             return res
         
     class CPUNormals(PointCloudMatProcessor):
-        title:str='calc_normals'
+        title:str='cpu_calc_normals'
         input_shape_types: list['ShapeType'] = []
         
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
@@ -113,6 +113,72 @@ class Processors:
                 if not self.input_shape_types[i].contains_normals():
                     ns = PointCloudBase(pcd[:,:3]).estimate_normals().get_normals()
                     res.append(np.hstack([pcd,ns]))
+            return res
+ 
+    class TorchNormals(PointCloudMatProcessor):
+        title:str='torch_calc_normals'
+        k: int = 16
+        input_shape_types: list['ShapeType'] = []
+        
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_torch_float()
+            self.input_shape_types.append(pcd.shape_type)
+        
+        def build_out_mats(self, validated_pcds: List[PointCloudMat], converted_raw_pcds):
+            self.out_mats = [
+                PointCloudMat(shape_type=old.info.shape_type.add_normals()).build(pcd)
+                for old, pcd in zip(validated_pcds, converted_raw_pcds)
+            ]
+            return self.out_mats
+        
+        def estimate_normals_torch(self, pcd: torch.Tensor, k: int = 16, default_normal=torch.tensor([0.0, 0.0, 1.0])) -> torch.Tensor:
+            """
+            Vectorized normal estimation using PCA (SVD) on k-nearest neighbors.
+            Handles edge cases where neighborhood is degenerate.
+            Args:
+                pcd: (N, 3) torch tensor of points.
+                k: Number of neighbors.
+                default_normal: Used when PCA fails.
+
+            Returns:
+                normals: (N, 3) torch tensor.
+            """
+            N = pcd.shape[0]
+            k = min(k, N)
+
+            if k < 3:
+                raise ValueError(f"Cannot compute normals with k={k}. Need at least 3 neighbors.")
+
+            dist_matrix = torch.cdist(pcd, pcd)  # (N, N)
+            knn_indices = dist_matrix.topk(k=k, largest=False).indices  # (N, k)
+            neighbors = pcd[knn_indices]  # (N, k, 3)
+
+            mean = neighbors.mean(dim=1, keepdim=True)
+            centered = neighbors - mean  # (N, k, 3)
+
+            try:
+                # SVD: centered = U S Vh; we want last row of Vh (least variance)
+                U, S, Vh = torch.linalg.svd(centered, full_matrices=False)
+                if Vh.shape[1] < 3:
+                    raise ValueError("Vh has insufficient components.")
+                normals = Vh[:, -1, :]  # (N, 3)
+            except RuntimeError as e:
+                print(f"SVD failed: {e}. Using default normals.")
+                normals = default_normal.expand(N, 3).to(pcd.device)
+
+            normals = F.normalize(normals, dim=1)
+            return normals
+        
+        def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                if not self.input_shape_types[i].contains_normals():
+                    if self.k < len(pcd):
+                        k=self.k
+                    else:
+                        k=len(pcd)
+                    ns = self.estimate_normals_torch(pcd[:,:3],k=k)
+                    res.append(torch.hstack([pcd,ns]))
             return res
 
     class RandomSample(PointCloudMatProcessor):
@@ -547,7 +613,7 @@ class Processors:
         _forward_raw:Callable = lambda pcds_data, pcds_info, meta:None
 
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
-            pass
+            self.init_common_utility_methods(pcd)
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
             return self._forward_raw(pcds_data,pcds_info,meta)

@@ -300,6 +300,15 @@ class PointCloudMatProcessor(BaseModel):
     _cross:Callable = lambda a,b: NotImplementedError()
     _matmul:Callable = lambda a,b: NotImplementedError()
     _to_numpy:Callable = lambda x: NotImplementedError()
+    _mean  :Callable = lambda x, dim=0: NotImplementedError()
+    _median:Callable = lambda x, dim=0: NotImplementedError()
+    _std   :Callable = lambda x, dim=0: NotImplementedError()
+    _max   :Callable = lambda x, dim=0: NotImplementedError()
+    _min   :Callable = lambda x, dim=0: NotImplementedError()
+    _abs   :Callable = lambda x: NotImplementedError()
+    _stack :Callable = lambda xs, dim=0: NotImplementedError()
+    _cat   :Callable = lambda xs, dim=0: NotImplementedError()
+    _reshape:Callable = lambda x, shape: NotImplementedError()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -314,6 +323,16 @@ class PointCloudMatProcessor(BaseModel):
             self._cross = lambda a,b: np.cross(a, b)
             self._matmul = lambda a,b: a @ b
             self._to_numpy = lambda x: x
+            self._mean   = lambda x, axis=0: np.mean(x, axis=axis)
+            self._median = lambda x, axis=0: np.median(x, axis=axis)
+            self._std    = lambda x, axis=0: np.std(x, axis=axis)
+            self._max    = lambda x, axis=0: np.max(x, axis=axis)
+            self._min    = lambda x, axis=0: np.min(x, axis=axis)
+            self._abs    = lambda x:        np.abs(x)
+            self._stack  = lambda xs, axis=0: np.stack(xs, axis=axis)
+            self._cat    = lambda xs, axis=0: np.concatenate(xs, axis=axis)
+            self._reshape = lambda x, shape:  np.reshape(x, shape)
+            
         if pcd.is_torch_tensor():
             self._mat = lambda pylist,dtype,device=None: torch.tensor(pylist,dtype=dtype,device=device)
             self._eye = lambda size,dtype,device=None: torch.eye(size, dtype=dtype, device=device)
@@ -324,6 +343,15 @@ class PointCloudMatProcessor(BaseModel):
             self._cross = lambda a,b: torch.cross(a, b)
             self._matmul = lambda a,b: torch.matmul(a, b)
             self._to_numpy = lambda x: x.cpu().numpy()
+            self._mean   = lambda x, dim=0: torch.mean(x, dim=dim)
+            self._median = lambda x, dim=0: torch.median(x, dim=dim).values
+            self._std    = lambda x, dim=0: torch.std(x, dim=dim, unbiased=False)
+            self._max    = lambda x, dim=0: torch.max(x, dim=dim).values
+            self._min    = lambda x, dim=0: torch.min(x, dim=dim).values
+            self._abs    = lambda x:        torch.abs(x)
+            self._stack  = lambda xs, dim=0: torch.stack(xs, dim=dim)
+            self._cat    = lambda xs, dim=0: torch.cat(xs, dim=dim)
+            self._reshape = lambda x, shape:  x.reshape(shape)
 
     def print(self, *args):
         print(f'##############[{self.uuid}]#################')
