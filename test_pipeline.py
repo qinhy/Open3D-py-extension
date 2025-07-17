@@ -31,13 +31,19 @@ def measure_fps(gen, test_duration=15, func = lambda imgs:None,
 
 def test1(sources):
 
+    ld_centerz = pro3d.processors.Processors.Lambda(uuid='Lambda:ld_centerz',save_results_to_meta=True)
     def centerz(pcds_data, pcds_info, meta):
         res = []
         for i,pcd in enumerate(pcds_data):
-            pcd[:,2] = pcd[:,2]-pcd[:,2].mean()
+            z_mean = -pcd[:,2].mean()
+            pcd[:,2] = pcd[:,2] + z_mean
             res.append(pcd)
+
+            # Construct a 4x4 transformation matrix T for the Z-shift
+            T = np.eye(4)
+            T[2, 3] = z_mean
+            ld_centerz.forward_T.append(T.tolist())
         return res
-    ld_centerz = pro3d.processors.Processors.Lambda()
     ld_centerz._forward_raw=centerz
 
     gen = pro3d.generator.NumpyRawFrameFileGenerator(sources=sources,
@@ -64,6 +70,19 @@ def test1(sources):
         return res
     ld_filterNz._forward_raw=filterNz
 
+
+    ld_backward_Ts = pro3d.processors.Processors.Lambda()
+    def backward_Ts(pcds_data, pcds_info, meta):
+        res = []
+        forwardTs = []
+        for i in ["PlaneNormalize:pn",]:
+            pass
+
+        for i,pcd in enumerate(pcds_data):
+            pass
+        return res
+    ld_backward_Ts._forward_raw=backward_Ts
+
     plane_det = pro3d.processors.Processors.PlaneDetection(distance_threshold=0.05,alpha=0.1)
     n_samples=100_000
     pipes = [
@@ -74,7 +93,8 @@ def test1(sources):
         pro3d.processors.Processors.RadiusSelection(radius=3.0),
         pro3d.processors.Processors.VoxelDownsample(voxel_size=0.025),
         plane_det,
-        pro3d.processors.Processors.PlaneNormalize(detection_uuid=plane_det.uuid),
+        pro3d.processors.Processors.PlaneNormalize(uuid="PlaneNormalize:pn",
+                                detection_uuid=plane_det.uuid,save_results_to_meta=True),
         ld_centerz,
         ld_filterz,
         pro3d.processors.Processors.TorchNormals(k=20),
@@ -82,7 +102,7 @@ def test1(sources):
         #### end GPU
 
         pro3d.processors.Processors.TorchToNumpy(),
-        # pro3d.processors.Processors.CPUNormals(),        
+        # pro3d.processors.Processors.CPUNormals(),
 
         pro3d.processors.Processors.ZDepthViewer(grid_size=100,img_size=256),
         pro3d.processors.Processors.O3DStreamViewer(),
@@ -103,4 +123,5 @@ if __name__ == "__main__":
                ['../zed_point_clouds.npy'],
                ['./data/bunny.npy'],
             ]:
+        print(s)
         test1(s)

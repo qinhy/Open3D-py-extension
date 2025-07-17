@@ -172,6 +172,9 @@ class Processors:
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
             res = []
             for i,pcd in enumerate(pcds_data):
+                if len(pcd)==0:
+                    res.append(pcd.reshape(-1,6))
+                    continue
                 if not self.input_shape_types[i].contains_normals():
                     if self.k < len(pcd):
                         k=self.k
