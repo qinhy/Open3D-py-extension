@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ipython>=9.4.0",
+    "trimesh>=4.7.1",
 ]
 
 [tool.uv.sources]

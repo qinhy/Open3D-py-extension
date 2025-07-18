@@ -69,9 +69,8 @@ class Processors:
         ) -> List[torch.Tensor]:
             res = []
             for i,pcd in enumerate(pcds_data):
-                tensor_pcd = torch.from_numpy(pcd).type(
-                                    PointCloudMatInfo.torch_pcd_dtype()
-                                ).to(self.num_devices[i%self.num_gpus])
+                tensor_pcd = torch.from_numpy(pcd).to(self.num_devices[i%self.num_gpus]
+                                    ).type(PointCloudMatInfo.torch_pcd_dtype())
                 res.append(tensor_pcd)
             return res
         
@@ -623,7 +622,7 @@ class Processors:
         
     class ZDepthViewer(PointCloudMatProcessor):
         title: str = 'z_depth_viewer'
-        bg:tuple[int,int,int] = (125,125,125)
+        bg:tuple[int,int,int] = (0,0,0) # (125,125,125)
         grid_size: int = 256  # Grid resolution (e.g., 256 x 256)
         img_size:int=0
 
