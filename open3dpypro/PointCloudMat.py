@@ -130,14 +130,7 @@ class PointCloudMat(BaseModel):
     @staticmethod
     def random(shape_type: Union[str, ShapeType], num_points: int = 1000, lib='np', device='cpu'):
         shape_type = ShapeType(shape_type)
-        dim_map = {
-            ShapeType.XYZ: 3,
-            ShapeType.XYZRGB: 6,
-            ShapeType.XYZi: 4,
-            ShapeType.XYZiRGB: 7,
-            ShapeType.XYZRGBi: 7,
-        }
-        D = dim_map.get(shape_type)
+        D = len(shape_type)
         if D is None:
             raise ValueError(f"Unsupported shape type: {shape_type}")
 
@@ -272,7 +265,76 @@ class PointCloudMat(BaseModel):
     def require_shape_types(self, shape_types: list[ShapeType]):
         if self.info.shape_type in shape_types:
             raise TypeError(f"Expected shape types {shape_types}, got {self.info.shape_type.value}")
-       
+
+class MatOps:
+    def mat(self, pylist,dtype,device=None):raise NotImplementedError()
+    def eye(self, size,dtype,device=None):raise NotImplementedError()
+    def ones(self, shape,dtype,device=None):raise NotImplementedError()
+    def hstack(self, arrays):raise NotImplementedError()
+    def norm(self, x):raise NotImplementedError()
+    def dot(self, a,b):raise NotImplementedError()
+    def cross(self, a,b):raise NotImplementedError()
+    def matmul(self, a,b):raise NotImplementedError()
+    def to_numpy(self, x):raise NotImplementedError()
+    def mean  (self, x, dim=0):raise NotImplementedError()
+    def median(self, x, dim=0):raise NotImplementedError()
+    def std   (self, x, dim=0):raise NotImplementedError()
+    def max   (self, x, dim=0):raise NotImplementedError()
+    def min   (self, x, dim=0):raise NotImplementedError()
+    def abs   (self, x):raise NotImplementedError()
+    def stack (self, xs, dim=0):raise NotImplementedError()
+    def cat   (self, xs, dim=0):raise NotImplementedError()
+    def reshape(self, x, shape):raise NotImplementedError()
+    def copy_mat   (self, x):raise NotImplementedError()
+    def logical_and (self, a,b):raise NotImplementedError()
+    def logical_or (self, a,b):raise NotImplementedError()
+
+class NumpyMatOps(MatOps):
+    def mat(self, pylist,dtype,device=None):return np.array(pylist,dtype=dtype)
+    def eye(self, size,dtype,device=None):return np.eye(size, dtype=dtype)
+    def ones(self, shape,dtype,device=None):return np.ones(shape, dtype=dtype)
+    def hstack(self, arrays):return np.hstack(arrays)
+    def norm(self, x):return np.linalg.norm(x)
+    def dot(self, a,b):return np.dot(a, b)
+    def cross(self, a,b):return np.cross(a, b)
+    def matmul(self, a,b):return a @ b
+    def to_numpy(self, x):return x
+    def mean  (self, x, dim=0):return np.mean(x, axis=dim)
+    def median(self, x, dim=0):return np.median(x, axis=dim)
+    def std   (self, x, dim=0):return np.std(x, axis=dim)
+    def max   (self, x, dim=0):return np.max(x, axis=dim)
+    def min   (self, x, dim=0):return np.min(x, axis=dim)
+    def abs   (self, x):return        np.abs(x)
+    def stack (self, xs, dim=0):return np.stack(xs, axis=dim)
+    def cat   (self, xs, dim=0):return np.concatenate(xs, axis=dim)
+    def reshape(self, x, shape):return  np.reshape(x, shape)
+    def copy_mat   (self, x):return  x.copy()
+    def logical_and (self, a,b):return  np.logical_and(a,b)
+    def logical_or (self, a,b):return  np.logical_or(a,b)
+    
+class TorchMatOps(MatOps):
+    def mat(self, pylist,dtype,device=None):return torch.tensor(pylist,dtype=dtype,device=device)
+    def eye(self, size,dtype,device=None):return torch.eye(size, dtype=dtype, device=device)
+    def ones(self, shape,dtype,device=None):return torch.ones(shape, dtype=dtype, device=device)
+    def hstack(self, arrays):return torch.cat(arrays, dim=1)
+    def norm(self, x):return torch.norm(x)
+    def dot(self, a,b):return torch.dot(a, b)
+    def cross(self, a,b):return torch.cross(a, b)
+    def matmul(self, a,b):return torch.matmul(a, b)
+    def to_numpy(self, x):return x.cpu().numpy()
+    def mean  (self, x, dim=0):return torch.mean(x, dim=dim)
+    def median(self, x, dim=0):return torch.median(x, dim=dim).values
+    def std   (self, x, dim=0):return torch.std(x, dim=dim, unbiased=False)
+    def max   (self, x, dim=0):return torch.max(x, dim=dim).values
+    def min   (self, x, dim=0):return torch.min(x, dim=dim).values
+    def abs   (self, x): return        torch.abs(x)
+    def stack (self, xs, dim=0):return torch.stack(xs, dim=dim)
+    def cat   (self, xs, dim=0):return torch.cat(xs, dim=dim)
+    def reshape(self, x, shape):return  x.reshape(shape)
+    def copy_mat   (self, x):return  x.clone()
+    def logical_and (self, a,b):return  torch.logical_and(a,b)
+    def logical_or (self, a,b):return  torch.logical_or(a,b)
+
 class PointCloudMatProcessor(BaseModel):
     class MetaData(BaseModel):
         model_config = {"arbitrary_types_allowed": True}
@@ -291,67 +353,15 @@ class PointCloudMatProcessor(BaseModel):
 
     forward_T:List[ List[List[float]] ]=[]
 
-    _mat:Callable = lambda pylist,dtype,device=None: NotImplementedError()
-    _eye:Callable = lambda size,dtype,device=None: NotImplementedError()
-    _ones:Callable = lambda shape,dtype,device=None: NotImplementedError()
-    _hstack:Callable = lambda arrays: NotImplementedError()
-    _norm:Callable = lambda x: NotImplementedError()
-    _dot:Callable = lambda a,b: NotImplementedError()
-    _cross:Callable = lambda a,b: NotImplementedError()
-    _matmul:Callable = lambda a,b: NotImplementedError()
-    _to_numpy:Callable = lambda x: NotImplementedError()
-    _mean  :Callable = lambda x, dim=0: NotImplementedError()
-    _median:Callable = lambda x, dim=0: NotImplementedError()
-    _std   :Callable = lambda x, dim=0: NotImplementedError()
-    _max   :Callable = lambda x, dim=0: NotImplementedError()
-    _min   :Callable = lambda x, dim=0: NotImplementedError()
-    _abs   :Callable = lambda x: NotImplementedError()
-    _stack :Callable = lambda xs, dim=0: NotImplementedError()
-    _cat   :Callable = lambda xs, dim=0: NotImplementedError()
-    _reshape:Callable = lambda x, shape: NotImplementedError()
+    _mat_funcs:list[MatOps] = []
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def init_common_utility_methods(self,pcd:PointCloudMat):
-        if pcd.is_ndarray():
-            self._mat = lambda pylist,dtype,device=None: np.array(pylist,dtype=dtype)
-            self._eye = lambda size,dtype,device=None: np.eye(size, dtype=dtype)
-            self._ones = lambda shape,dtype,device=None: np.ones(shape, dtype=dtype)
-            self._hstack = lambda arrays: np.hstack(arrays)
-            self._norm = lambda x: np.linalg.norm(x)
-            self._dot = lambda a,b: np.dot(a, b)
-            self._cross = lambda a,b: np.cross(a, b)
-            self._matmul = lambda a,b: a @ b
-            self._to_numpy = lambda x: x
-            self._mean   = lambda x, axis=0: np.mean(x, axis=axis)
-            self._median = lambda x, axis=0: np.median(x, axis=axis)
-            self._std    = lambda x, axis=0: np.std(x, axis=axis)
-            self._max    = lambda x, axis=0: np.max(x, axis=axis)
-            self._min    = lambda x, axis=0: np.min(x, axis=axis)
-            self._abs    = lambda x:        np.abs(x)
-            self._stack  = lambda xs, axis=0: np.stack(xs, axis=axis)
-            self._cat    = lambda xs, axis=0: np.concatenate(xs, axis=axis)
-            self._reshape = lambda x, shape:  np.reshape(x, shape)
-            
-        if pcd.is_torch_tensor():
-            self._mat = lambda pylist,dtype,device=None: torch.tensor(pylist,dtype=dtype,device=device)
-            self._eye = lambda size,dtype,device=None: torch.eye(size, dtype=dtype, device=device)
-            self._ones = lambda shape,dtype,device=None: torch.ones(shape, dtype=dtype, device=device)
-            self._hstack = lambda arrays: torch.cat(arrays, dim=1)
-            self._norm = lambda x: torch.norm(x)
-            self._dot = lambda a,b: torch.dot(a, b)
-            self._cross = lambda a,b: torch.cross(a, b)
-            self._matmul = lambda a,b: torch.matmul(a, b)
-            self._to_numpy = lambda x: x.cpu().numpy()
-            self._mean   = lambda x, dim=0: torch.mean(x, dim=dim)
-            self._median = lambda x, dim=0: torch.median(x, dim=dim).values
-            self._std    = lambda x, dim=0: torch.std(x, dim=dim, unbiased=False)
-            self._max    = lambda x, dim=0: torch.max(x, dim=dim).values
-            self._min    = lambda x, dim=0: torch.min(x, dim=dim).values
-            self._abs    = lambda x:        torch.abs(x)
-            self._stack  = lambda xs, dim=0: torch.stack(xs, dim=dim)
-            self._cat    = lambda xs, dim=0: torch.cat(xs, dim=dim)
-            self._reshape = lambda x, shape:  x.reshape(shape)
+    def init_common_utility_methods(self,idx,is_ndarray=True):
+        if idx<len(self._mat_funcs):
+            self._mat_funcs[idx] = NumpyMatOps() if is_ndarray else TorchMatOps()
+        else:            
+            self._mat_funcs.append( NumpyMatOps() if is_ndarray else TorchMatOps() )
 
     def print(self, *args):
         print(f'##############[{self.uuid}]#################')
@@ -363,6 +373,8 @@ class PointCloudMatProcessor(BaseModel):
             self.title = self.__class__.__name__
         if not self.uuid:
             self.uuid = f'{self.__class__.__name__}:{uuid.uuid4()}'
+        for idx,img in enumerate(self.input_mats):
+            self.init_common_utility_methods(idx,img.is_ndarray())
         return super().model_post_init(context)
 
     def is_enable(self):
@@ -470,3 +482,7 @@ class PointCloudMatProcessor(BaseModel):
 
     def __del__(self):
         self.release()
+
+
+
+        

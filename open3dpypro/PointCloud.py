@@ -887,7 +887,7 @@ class PointCloud(PointCloudAdvanceIO):
         
         def simple_seg_connected_components_by_img(self, img: np.ndarray, minx: float, T: float, miny: float, invT: float, resolution: float, idx2img: Callable[[np.ndarray], np.ndarray]):
             import cv2
-            pcds = []
+            pcds:list[PointCloud] = []
             idx  = np.asarray(idx2img)
             nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(img)
             p_labels = labels[idx[:,1],idx[:,0]]
@@ -905,7 +905,7 @@ class PointCloud(PointCloudAdvanceIO):
             idx = np.asarray(idx2img)
             nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(img)
             # print(nlabels)
-            pcds = []
+            pcds:list[PointCloud] = []
             p_labels = labels[idx[:,1],idx[:,0]]
             for i in stats[:,-1].argsort()[::-1][1:top_n+1]:
                 res = floorMappcd._select_by_idx(np.where(p_labels==i)[0].tolist())

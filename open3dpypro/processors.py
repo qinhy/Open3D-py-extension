@@ -162,7 +162,7 @@ class Processors:
                     raise ValueError("Vh has insufficient components.")
                 normals = Vh[:, -1, :]  # (N, 3)
             except RuntimeError as e:
-                print(f"SVD failed: {e}. Using default normals.")
+                logger(f"SVD failed: {e}. Using default normals.")
                 normals = default_normal.expand(N, 3).to(pcd.device)
 
             normals = F.normalize(normals, dim=1)
@@ -394,7 +394,7 @@ class Processors:
                 # Compute normal vector
                 v1 = p2 - p1
                 v2 = p3 - p1
-                normal = torch.cross(v1, v2)
+                normal = torch.cross(v1, v2, dim=-1)
 
                 if torch.norm(normal) < 1e-6:
                     continue  # Degenerate, skip
@@ -457,7 +457,7 @@ class Processors:
 
                 v1 = p2 - p1
                 v2 = p3 - p1
-                normals = torch.cross(v1, v2)
+                normals = torch.cross(v1, v2, dim=-1)
 
                 norms = torch.norm(normals, dim=1, keepdim=True)
                 valid_mask = norms[:, 0] > 1e-6
@@ -557,41 +557,42 @@ class Processors:
         filter_pcd: bool = False
 
         def validate_pcd(self, idx, pcd):
-            self.init_common_utility_methods(pcd)
+            self.init_common_utility_methods(idx,pcd.is_ndarray())
 
         def rotation_matrix_from_vectors(self, vec1, vec2, device=None):
-            a:Union[np.ndarray, torch.Tensor] = vec1 / self._norm(vec1)
-            b = vec2 / self._norm(vec2)
-            v = self._cross(a, b)
-            if self._norm(v) < 1e-6:
-                return self._eye(3, dtype=a.dtype, device=device)
+            a:Union[np.ndarray, torch.Tensor] = vec1 / self._mat_funcs[0].norm(vec1)
+            b = vec2 / self._mat_funcs[0].norm(vec2)
+            v = self._mat_funcs[0].cross(a, b)
+            if self._mat_funcs[0].norm(v) < 1e-6:
+                return self._mat_funcs[0].eye(3, dtype=a.dtype, device=device)
 
-            c = self._dot(a, b)
-            s = self._norm(v)
-            kmat = self._mat([
+            c = self._mat_funcs[0].dot(a, b)
+            s = self._mat_funcs[0].norm(v)
+            kmat = self._mat_funcs[0].mat([
                     [0, -v[2], v[1]],
                     [v[2], 0, -v[0]],
                     [-v[1], v[0], 0]
                 ], dtype=a.dtype, device=device)
-            return self._eye(3, dtype=a.dtype, device=device) + kmat + self._matmul(kmat, kmat) * ((1 - c) / (s ** 2))
+            return self._mat_funcs[0].eye(3, dtype=a.dtype, device=device) + kmat + self._mat_funcs[0].matmul(kmat, kmat) * ((1 - c) / (s ** 2))
 
         def rotate_to_plane(self, pcd_data:Union[np.ndarray, torch.Tensor], plane: List[float], device=None):
             a, b, c, d = plane
             xyz = pcd_data[:, :3]
-            normal = self._mat([a, b, c], dtype=pcd_data.dtype, device=device)
-            z_axis = self._mat([0, 0, 1], dtype=pcd_data.dtype, device=device)
+
+            normal = self._mat_funcs[0].mat([a, b, c], dtype=pcd_data.dtype, device=device)
+            z_axis = self._mat_funcs[0].mat([0, 0, 1], dtype=pcd_data.dtype, device=device)
 
             R = self.rotation_matrix_from_vectors(normal, z_axis, device)
-            point_on_plane = -d * normal / self._dot(normal, normal)
-            t = -self._matmul(R, point_on_plane)
+            point_on_plane = -d * normal / self._mat_funcs[0].dot(normal, normal)
+            t = -self._mat_funcs[0].matmul(R, point_on_plane)
 
-            T = self._eye(4, dtype=pcd_data.dtype, device=device)
+            T = self._mat_funcs[0].eye(4, dtype=pcd_data.dtype, device=device)
             T[:3, :3] = R
             T[:3, 3] = t
 
-            ones_row = self._ones((pcd_data.shape[0], 1), dtype=pcd_data.dtype, device=device)
-            homo = self._hstack([xyz, ones_row])
-            xyz_transformed = self._matmul(T, homo.T).T[:, :3]
+            ones_row = self._mat_funcs[0].ones((pcd_data.shape[0], 1), dtype=pcd_data.dtype, device=device)
+            homo = self._mat_funcs[0].hstack([xyz, ones_row])
+            xyz_transformed = self._mat_funcs[0].matmul(T, homo.T).T[:, :3]
 
             return xyz_transformed, T
 
@@ -604,8 +605,8 @@ class Processors:
                 device = pcd.device if hasattr(pcd,'device') else None
 
                 xyz, T = self.rotate_to_plane(pcd, models[i], device=device)
-                out = self._hstack([xyz, pcd[:, 3:]]) if pcd.shape[1] > 3 else xyz
-                self.forward_T[i] = self._to_numpy(T).tolist()
+                out = self._mat_funcs[0].hstack([xyz, pcd[:, 3:]]) if pcd.shape[1] > 3 else xyz
+                self.forward_T[i] = self._mat_funcs[0].to_numpy(T).tolist()
                 res.append(out)
 
             return res
@@ -614,11 +615,40 @@ class Processors:
         title:str='lambda'
         _forward_raw:Callable = lambda pcds_data, pcds_info, meta:None
 
-        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
-            self.init_common_utility_methods(pcd)
+        def validate_pcd(self, idx, pcd:PointCloudMat):
+            self.init_common_utility_methods(idx,pcd.is_ndarray())
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
             return self._forward_raw(pcds_data,pcds_info,meta)
+        
+    class SimpleSegConnectedComponents(PointCloudMatProcessor):
+        title:str='simple_seg_connected_components'
+        plane: list[float] = [0,0,1.0,0.0]
+        thickness: float = 0.05
+        resolution: float = 0.1
+        minpoints: int = 20
+        top_n: int = 100
+        
+        def build_out_mats(self, validated_pcds: List[PointCloudMat], converted_raw_pcds):
+            self.out_mats = [
+                PointCloudMat(shape_type=ShapeType.XYZ).build(pcd)
+                for pcd in converted_raw_pcds
+            ]
+            return self.out_mats
+    
+        def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
+            pcd.require_ndarray()
+
+        def forward_raw(self, pcds_data, pcd_infos = ..., meta=...):
+            res = []
+            for i,pcd in enumerate(pcds_data):
+                tmp = PointCloud(pcd[:,:3]).simple_seg_connected_components(
+                        np.asarray(self.plane),self.thickness,self.resolution,self.minpoints,self.top_n)
+                res += [i.get_points() for i in tmp]
+            if len(res)<self.top_n:
+                for i in range(self.top_n-len(res)):
+                    res.append(np.zeros((0,3)))
+            return res
         
     class ZDepthViewer(PointCloudMatProcessor):
         title: str = 'z_depth_viewer'
@@ -626,76 +656,75 @@ class Processors:
         grid_size: int = 256  # Grid resolution (e.g., 256 x 256)
         img_size:int=0
 
-        def validate_pcd(self, pcd_idx, pcd: PointCloudMat):
+        def validate_pcd(self, idx, pcd: PointCloudMat):
             if pcd.is_ndarray():
                 pcd.require_ndarray()
             if pcd.is_torch_tensor():
                 pcd.require_torch_float()
+            self.init_common_utility_methods(idx,pcd.is_ndarray())
 
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo] = [], meta={}) -> List[np.ndarray]:
             for i, pcd in enumerate(pcds_data):
                 z_img_color = np.zeros((self.grid_size,self.grid_size,3),dtype=np.uint8)
-
                 if len(pcd)>0:
                     # Use XYZ coordinates only
                     xyz = pcd[:, :3]
                     # Extract Z (depth) channel
-                    x = xyz[:, 0].copy()
+                    x = self._mat_funcs[0].copy_mat(xyz[:, 0])
                     x -= x.min()
-                    y = xyz[:, 1].copy()
+                    y = self._mat_funcs[0].copy_mat(xyz[:, 1])
                     y -= y.min()
-                    z = xyz[:, 2].copy()
+                    z = self._mat_funcs[0].copy_mat(xyz[:, 2])
 
                     # Normalize x and y to [0, 1]
                     x_min, x_max = x.min(), x.max()
                     y_min, y_max = y.min(), y.max()
                     xy_min, xy_max = min(x_min,y_min), max(x_max,y_max)
 
-                    if x_max - x_min < 1e-5 or y_max - y_min < 1e-5:
-                        logger(f"Skipping point cloud {i}: flat x or y range.")
-                        continue
+                    if not (x_max - x_min < 1e-5 or y_max - y_min < 1e-5):
+                        # logger(f"Skipping point cloud {i}: flat x or y range.")
+                        # continue
 
-                    x_norm = (x - xy_min) / (xy_max - xy_min)
-                    y_norm = (y - xy_min) / (xy_max - xy_min)
+                        x_norm = (x - xy_min) / (xy_max - xy_min)
+                        y_norm = (y - xy_min) / (xy_max - xy_min)
 
-                    # Map to grid indices
-                    xi = np.clip((x_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
-                    yi = np.clip((y_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
+                        # Map to grid indices
+                        xi = np.clip((x_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
+                        yi = np.clip((y_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
 
-                    # Initialize grid with NaNs (or large value)
-                    z_grid = np.full((self.grid_size, self.grid_size), np.nan, dtype=np.float32)
+                        # Initialize grid with NaNs (or large value)
+                        z_grid = np.full((self.grid_size, self.grid_size), np.nan, dtype=np.float32)
 
-                    # Assign z to grid cells — here, use last point if collisions
-                    z_grid[yi, xi] = z
+                        # Assign z to grid cells — here, use last point if collisions
+                        z_grid[yi, xi] = z
 
-                    # Fill NaNs with min value (optional, or use interpolation)
-                    if np.isnan(z_grid).any():
-                        z_min = np.nanmin(z_grid)
-                        z_grid = np.where(np.isnan(z_grid), z_min, z_grid)
+                        # Fill NaNs with min value (optional, or use interpolation)
+                        if np.isnan(z_grid).any():
+                            z_min = np.nanmin(z_grid)
+                            z_grid = np.where(np.isnan(z_grid), z_min, z_grid)
 
-                    # Normalize z to [0, 255]
-                    z_min, z_max = z_grid.min(), z_grid.max()
-                    if z_max - z_min < 1e-5:
-                        z_norm = np.zeros_like(z_grid)
-                    else:
-                        z_norm = (z_grid - z_min) / (z_max - z_min)
+                        # Normalize z to [0, 255]
+                        z_min, z_max = z_grid.min(), z_grid.max()
+                        if z_max - z_min < 1e-5:
+                            z_norm = np.zeros_like(z_grid)
+                        else:
+                            z_norm = (z_grid - z_min) / (z_max - z_min)
 
-                    z_img = (z_norm * 255).astype(np.uint8)
-                    # Optional: apply colormap
-                    z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
-                    z_img_color[z_img==0] = self.bg
-                    if self.img_size:
-                        z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
-
+                        z_img = (z_norm * 255).astype(np.uint8)
+                        # Optional: apply colormap
+                        z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
+                        z_img_color[z_img==0] = self.bg
+                        if self.img_size:
+                            z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
                 # Show image
-                cv2.imshow(f"Z Depth Viewer {i}", z_img_color)
+                cv2.imshow(f"{self.title}_{i}", z_img_color)
                 cv2.waitKey(1)
 
             return pcds_data
 
         def release(self):
             for i,m in enumerate(self.input_mats):
-                cv2.destroyWindow(f"Z Depth Viewer {i}")
+                cv2.destroyWindow(f"{self.title}_{i}")
             return super().release()
 
     class O3DStreamViewer(PointCloudMatProcessor):
