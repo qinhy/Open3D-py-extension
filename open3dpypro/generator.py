@@ -125,6 +125,7 @@ class PointCloudMatGenerator(BaseModel):
     
 class NumpyRawFrameFileGenerator(PointCloudMatGenerator):
     shape_types: list['ShapeType']
+    loop:bool=True
     def create_frame_generator(self, idx,source):
         arr = np.load(source)
         def gen(arr=arr):
@@ -132,7 +133,12 @@ class NumpyRawFrameFileGenerator(PointCloudMatGenerator):
             while True:
                 # idx = np.random.choice(len(arr))
                 # yield np.ascontiguousarray(arr[20])
-                idx = cnt%len(arr)
+                if self.loop:
+                    idx = cnt%len(arr)
+                else:
+                    idx = cnt
+                    if idx>=len(arr):
+                        break
                 d = arr[idx]
                 d = d[~np.isnan(d.sum(1))]
                 yield np.ascontiguousarray(d)
