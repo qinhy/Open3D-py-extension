@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [    
+dependencies = [
     "torch==2.5.0+cu124",
     "torchvision==0.20.0+cu124",
     "laspy>=2.6.1",
@@ -12,6 +12,7 @@ dependencies = [
     "opencv-python>=4.12.0.88",
     "pydantic>=2.11.7",
     "pye57>=0.4.17",
+    "objaverse>=0.1.7",
 ]
 
 [dependency-groups]
