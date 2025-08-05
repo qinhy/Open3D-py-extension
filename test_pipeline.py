@@ -4,7 +4,7 @@ from typing import List
 
 import cv2
 import numpy as np
-from image_pipeblocks.image_pipeblocks.ImageMat import ColorType, ImageMat, ShapeType
+from image_pipeblocks.image_pipeblocks.ImageMat import ColorType, ImageMat, ImageMatInfo, ShapeType
 from image_pipeblocks.image_pipeblocks.processors import Processors as ImgProcessors
 import open3dpypro as pro3d
 from open3dpypro.PointCloudMat import PointCloudMat, PointCloudMatInfo
@@ -86,7 +86,6 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
                 z_min = z.min() if self.z_min==self.inf else self.z_min
                 z_max = z.max() if self.z_max==self.inf else self.z_max
                 # xy_min, xy_max = min(x_min,y_min), max(x_max,y_max)
-                print(x_min,y_min,x_max,y_max,z_min,z_max)
 
                 if not (x_max - x_min < 1e-5 or y_max - y_min < 1e-5):
                     # logger(f"Skipping point cloud {i}: flat x or y range.")
@@ -125,11 +124,12 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
                         z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
                         z_img = cv2.resize(z_img,(self.img_size,self.img_size))
                     self._img_data.append(z_img)
+            else:
+                raise ValueError(f"Point cloud {i} is empty, cannot create depth image.")
         return self._img_data
 
-    
 
-def test1(sources):
+def test1(sources,loop=False):
 
     ld_direction = pro3d.processors.Processors.Lambda()
     def direction(pcds_data, pcds_info, meta):
@@ -216,7 +216,6 @@ def test1(sources):
         return res    
     ld_backward_Ts._forward_raw=backward_Ts
 
-
     mergedepth = pro3d.processors.Processors.Lambda()
     def merged(pcds_data, pcds_info, meta):
         fu = meta["ZDepthViewer:full"]._img_data
@@ -227,12 +226,63 @@ def test1(sources):
         return pcds_data
     mergedepth._forward_raw=merged
 
+    from skimage.measure import label, regionprops
+    binimg_cls = ImgProcessors.Lambda(title='seg',out_color_type=ColorType.BGR)
+    def cleanandfit(imgs_data: List[np.ndarray], imgs_info: List[ImageMatInfo]=[], meta={}):
+        res = []
+        for i,binary in enumerate(imgs_data):
+            # Apply morphological erosion to reduce noise and thin out the regions
+            kernel = np.ones((3, 3), np.uint8)  # Small 3x3 kernel
+            binary = cv2.erode(binary, kernel, iterations=2)
+
+            # Label connected regions
+            labeled = label(binary)
+            min_area = 100  # This can be adjusted depending on the expected size of real regions
+            # Create a new binary image excluding small regions
+            filtered_binary = np.zeros_like(binary)
+            for region in regionprops(labeled):
+                if region.area >= min_area:
+                    coords = region.coords
+                    for r, c in coords:
+                        filtered_binary[r, c] = 255
+
+            # Relabel the filtered binary image
+            filtered_labeled = label(filtered_binary)
+
+            # Create an output image to plot X-direction center points
+            output_image = np.stack([filtered_binary]*3, axis=-1)
+
+            # Repeat X-direction center point extraction
+            for region in regionprops(filtered_labeled):
+                minr, minc, maxr, maxc = region.bbox
+                region_mask = (filtered_labeled[minr:maxr, minc:maxc] == region.label)
+
+                for x in range(region_mask.shape[1]):
+                    y_indices = np.where(region_mask[:, x])[0]
+                    if len(y_indices) > 0:
+                        center_y = int(np.mean(y_indices))
+                        center_x = x
+                        output_image[minr + center_y, minc + center_x] = [0, 255, 0]  # Mark in green
+            
+                # Split each region along Y-direction and plot center of each row segment 
+                for y in range(region_mask.shape[0]):
+                    x_indices = np.where(region_mask[y])[0]
+                    if len(x_indices) > 0:
+                        center_x = int(np.mean(x_indices))
+                        center_y = y
+                        output_image[minr + center_y, minc + center_x] = [255, 0, 0]
+
+            res.append(output_image)
+        return res
+    binimg_cls._forward_raw=cleanandfit
+
+
     n_samples=50_000
     voxel_size=0.02
     radius=2.0
     top_n=5
 
-    gen = pro3d.generator.NumpyRawFrameFileGenerator(sources=sources,loop=False,
+    gen = pro3d.generator.NumpyRawFrameFileGenerator(sources=sources,loop=loop,
                             shape_types=[pro3d.ShapeType.XYZ])    
     plane_det = pro3d.processors.Processors.PlaneDetection(distance_threshold=voxel_size*2,alpha=0.1)
     pipes = [
@@ -269,11 +319,17 @@ def test1(sources):
         #                             x_min=-radius,x_max=radius,y_min=-radius,y_max=radius,z_min=-0.50,z_max=0.50,
         #                             save_results_to_meta=True),
         ZDepthImage(grid_size=128,img_size=224),
+        ImgProcessors.CvImageViewer(title='depth'),
+
         ImgProcessors.NumpyGrayToTorchGray(),
         ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=92-step=36735.ckpt',
                                     device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
-        ImgProcessors.CvImageViewer(),
+        
+        ImgProcessors.CvImageViewer(title='depthseg'),
+
+        binimg_cls,
+        ImgProcessors.CvImageViewer(title='segfit',scale=2.0),
         # pro3d.processors.Processors.MergePCDs(),
         # pro3d.processors.Processors.O3DStreamViewer(),
         # mergedepth,s
@@ -291,12 +347,12 @@ def test1(sources):
 
 if __name__ == "__main__":
     for s in [
-               ['../zed_point_clouds.npy'],
+            #    ['../zed_point_clouds.npy'],
             #    ['./data/bunny.npy'],
-               ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
+            #    ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
                ['../2025-06-12_12-10-25.white.top.center.Csv.npy'],
-               ['../2025-06-12_11-58-20.black.top.right.Csv.npy'],
-               ['../2025-06-12_11-58-20.black.top.center.Csv.npy'],
+            #    ['../2025-06-12_11-58-20.black.top.right.Csv.npy'],
+            #    ['../2025-06-12_11-58-20.black.top.center.Csv.npy'],
             ]:
         print(s)
-        test1(s)
+        test1(s,loop=True)

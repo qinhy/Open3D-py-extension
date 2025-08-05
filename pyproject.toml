@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.11.7",
     "pye57>=0.4.17",
     "objaverse>=0.1.7",
+    "scikit-image>=0.25.2",
 ]
 
 [dependency-groups]
