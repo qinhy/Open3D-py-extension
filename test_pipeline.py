@@ -32,6 +32,27 @@ def measure_fps(gen, test_duration=15, func = lambda imgs:None,
 
 def test1(sources):
 
+    ld_direction = pro3d.processors.Processors.Lambda()
+    def direction(pcds_data, pcds_info, meta):
+        directions = []
+
+        for pcd in pcds_data:
+            x, y = pcd[:, 0], pcd[:, 1]
+            counts = {
+                "minus_x": (x < 0).sum(),
+                "plus_x": (x > 0).sum(),
+                "minus_y": (y < 0).sum(),
+                "plus_y": (y > 0).sum(),
+            }
+            dominant = max(counts, key=counts.get)
+            directions.append(dominant)
+            print(dominant)
+
+        meta["directions"] = directions
+        return pcds_data
+
+    ld_direction._forward_raw=direction
+    
     ld_centerz = pro3d.processors.Processors.Lambda(uuid='Lambda:ld_centerz',save_results_to_meta=True)
     def centerz(pcds_data, pcds_info, meta):
         res = []
@@ -138,6 +159,7 @@ def test1(sources):
         ld_filterz_1,
         # ld_filterNz,
         #### end GPU
+        ld_direction,
         pro3d.processors.Processors.TorchToNumpy(),
         pro3d.processors.Processors.O3DStreamViewer(),
         pro3d.processors.Processors.ZDepthViewer(uuid="ZDepthViewer:full",grid_size=64,img_size=512,
@@ -173,6 +195,10 @@ if __name__ == "__main__":
     for s in [
                ['../zed_point_clouds.npy'],
             #    ['./data/bunny.npy'],
+               ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
+               ['../2025-06-12_12-10-25.white.top.center.Csv.npy'],
+               ['../2025-06-12_11-58-20.black.top.right.Csv.npy'],
+               ['../2025-06-12_11-58-20.black.top.center.Csv.npy'],
             ]:
         print(s)
         test1(s)

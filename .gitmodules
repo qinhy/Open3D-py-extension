@@ -1,0 +1,3 @@
+[submodule "image_pipeblocks"]
+	path = image_pipeblocks
+	url = https://github.com/qinhy/image-pipeblocks
