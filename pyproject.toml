@@ -22,6 +22,7 @@ dev = [
     "pyopengl>=3.1.0",
     "pyrender>=0.1.45",
     "trimesh>=4.7.1",
+    "ultralytics>=8.3.174",
 ]
 
 [tool.uv.sources]
