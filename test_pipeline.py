@@ -93,7 +93,7 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
             # empty => zero image
             gs = 128 if self.grid_size < 0 else self.grid_size
             if is_torch:
-                depth = funcs.zeros((gs, gs), dtype=funcs.float16)
+                depth = funcs.zeros((1,1, gs, gs), dtype=funcs.float16)
             else:
                 depth = funcs.zeros((gs, gs), dtype=funcs.uint8)
             return depth
@@ -167,7 +167,6 @@ def test1(sources,loop=False):
             }
             dominant = max(counts, key=counts.get)
             directions.append(dominant)
-            print(dominant)
 
         meta[ld_direction.uuid] = directions
         return pcds_data
@@ -236,12 +235,13 @@ def test1(sources,loop=False):
         return pcds_data
     mergedepth._forward_raw=merged
 
-    binimg_cls = ImgProcessors.Lambda(title='seg',out_color_type=ColorType.GRAYSCALE)
+    binimg_cls = ImgProcessors.Lambda(title='seg',out_color_type=ColorType.BGR)
     def cleanandfit(imgs_data: List[np.ndarray], imgs_info: List[ImageMatInfo]=[], meta={}):
         res = []
         min_area = 1000
+        directions = meta.get(ld_direction.uuid, [])
 
-        for binary in imgs_data:
+        for idx,binary in enumerate(imgs_data):
             # Ensure single-channel uint8
             if binary.dtype != np.uint8:
                 binary = binary.astype(np.uint8)
@@ -276,7 +276,7 @@ def test1(sources,loop=False):
             num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
             if num_labels <= 1:
                 # No components found, return original binary
-                output_image = np.dstack([binary*0, binary*0, binary*0])
+                output_image = np.zeros_like(binary, dtype=np.uint8)
                 res.append(output_image)
                 continue
 
@@ -287,14 +287,13 @@ def test1(sources,loop=False):
             # Build filtered binary via label-index lookup (no Python loops)
             keep_mask = np.zeros(num_labels, dtype=bool)
             keep_mask[keep] = True
-            filtered_mask = keep_mask[labels]     # boolean mask of kept components
-            # filtered_binary = (filtered_mask * 255).astype(np.uint8)
-
 
             ###############################################################       
             # Prepare 3-channel output (copy of filtered mask)
-            # output_image = np.dstack([filtered_binary, filtered_binary, filtered_binary])
-            output_image = np.zeros((binary.shape[0], binary.shape[1], 3), dtype=np.uint8)
+            filtered_mask = keep_mask[labels]     # boolean mask of kept components
+            filtered_binary = (filtered_mask * 255).astype(np.uint8)
+            output_image = np.dstack([filtered_binary, filtered_binary, filtered_binary])
+            # output_image = np.zeros((binary.shape[0], binary.shape[1], 3), dtype=np.uint8)
 
             # For each remaining component, compute centers per column/row in vectorized form
             for lbl in keep:
@@ -304,8 +303,7 @@ def test1(sources,loop=False):
                 h = stats[lbl, cv2.CC_STAT_HEIGHT]
 
                 region_mask = (labels[y:y+h, x:x+w] == lbl)
-                if not region_mask.any():
-                    continue
+                if not region_mask.any(): continue
 
                 # Precompute index grids for this region
                 row_idx = np.arange(h, dtype=np.int64)[:, None]   # shape (h,1)
@@ -314,34 +312,34 @@ def test1(sources,loop=False):
                 # ---- X-direction: center per column (mark GREEN) ----
                 col_counts = region_mask.sum(axis=0)                               # (w,)
                 valid_cols = col_counts > 0
-                if valid_cols.any():
+                if valid_cols.any() and  "_x" in directions[idx]:
                     # sum of row indices per column; integer division matches int(np.mean(...))
                     sum_rows_per_col = (row_idx * region_mask).sum(axis=0)         # (w,)
                     cy = (sum_rows_per_col[valid_cols] // col_counts[valid_cols])  # (k,)
                     cx = np.where(valid_cols)[0]                                   # (k,)
-                    output_image[y + cy, x + cx] = (255, 0, 0)
+                    output_image[y + cy, x + cx] = (255, 0, lbl)
 
                 # ---- Y-direction: center per row (mark RED) ----
                 row_counts = region_mask.sum(axis=1)                               # (h,)
                 valid_rows = row_counts > 0
-                if valid_rows.any():
+                if valid_rows.any() and  "_y" in directions[idx]:
                     sum_cols_per_row = (col_idx * region_mask).sum(axis=1)         # (h,)
                     cx2 = (sum_cols_per_row[valid_rows] // row_counts[valid_rows]) # (m,)
                     cy2 = np.where(valid_rows)[0]                                   # (m,)
-                    output_image[y + cy2, x + cx2] = (0, 255, 0)
+                    output_image[y + cy2, x + cx2] = (0, 255, lbl)
 
-            # res.append(output_image)    
+            res.append(output_image)
             # res+= [output_image[..., 0], output_image[..., 1]]            
             ###############################################################
-            directions = meta.get(ld_direction.uuid, [])
-            if len(directions) > 0:
-                # Draw direction arrows on the output image
-                for j, direction in enumerate(directions):
-                    if "_x" in direction:
-                        tmp = output_image[..., 0]
-                    elif "_y" in direction:
-                        tmp = output_image[..., 1]
-                res.append(tmp)
+            # directions = meta.get(ld_direction.uuid, [])
+            # if len(directions) > 0:
+            #     # Draw direction arrows on the output image
+            #     for j, direction in enumerate(directions):
+            #         if "_x" in direction:
+            #             tmp = output_image[..., 0]
+            #         elif "_y" in direction:
+            #             tmp = output_image[..., 1]
+            #     res.append(tmp)
         return res
     binimg_cls._forward_raw=cleanandfit
 
