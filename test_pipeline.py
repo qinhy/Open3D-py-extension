@@ -231,10 +231,9 @@ def test1(sources,loop=False):
     def cleanandfit(imgs_data: List[np.ndarray], imgs_info: List[ImageMatInfo]=[], meta={}):
         res = []
         for i,binary in enumerate(imgs_data):
-            # Apply morphological erosion to reduce noise and thin out the regions
             kernel = np.ones((3, 3), np.uint8)  # Small 3x3 kernel
+            # Apply morphological erosion to reduce noise and thin out the regions
             binary = cv2.erode(binary, kernel, iterations=2)
-
             # Label connected regions
             labeled = label(binary)
             min_area = 100  # This can be adjusted depending on the expected size of real regions
@@ -318,11 +317,12 @@ def test1(sources,loop=False):
         # pro3d.processors.Processors.ZDepthViewer(uuid="ZDepthViewer:seg",grid_size=64,img_size=512,
         #                             x_min=-radius,x_max=radius,y_min=-radius,y_max=radius,z_min=-0.50,z_max=0.50,
         #                             save_results_to_meta=True),
-        ZDepthImage(grid_size=128,img_size=224),
+        ZDepthImage(grid_size=224,img_size=224),
+        
         ImgProcessors.CvImageViewer(title='depth'),
 
         ImgProcessors.NumpyGrayToTorchGray(),
-        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=92-step=36735.ckpt',
+        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=183-step=58144.ckpt',
                                     device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
         
