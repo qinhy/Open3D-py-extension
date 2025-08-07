@@ -122,13 +122,15 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
                     # z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
                     # z_img_color[z_img==0] = self.bg
                     # z_img_color[:,:,1] = z_img
-
-                    if self.img_size:
-                        # z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
-                        z_img = cv2.resize(z_img,(self.img_size,self.img_size))
-                    self._img_data.append(z_img)
             else:
-                raise ValueError(f"Point cloud {i} is empty, cannot create depth image.")
+                grid_size = 128 if self.grid_size < 0 else self.grid_size
+                z_img = np.zeros((grid_size, grid_size), dtype=np.uint8)
+                # raise ValueError(f"Point cloud {i} is empty, cannot create depth image.")
+
+            if self.img_size:
+                # z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
+                z_img = cv2.resize(z_img,(self.img_size,self.img_size))
+            self._img_data.append(z_img)
         return self._img_data
 
 
@@ -243,39 +245,36 @@ def test1(sources,loop=False):
             # Threshold (binary 0/255)
             _, binary = cv2.threshold(binary, 127, 255, cv2.THRESH_BINARY)
 
-            #####################            
+            ###############################################################            
             # Step 1: Fill holes inside regions
             # Invert mask to find background-connected components
             holes = cv2.bitwise_not(binary)
-
             # Flood fill from top-left corner
             h, w = holes.shape
             flood = np.zeros((h+2, w+2), np.uint8)  # Padding needed for floodFill
             cv2.floodFill(holes, flood, (0, 0), 255)
-
             # Invert flood-filled to get only the holes
             holes_filled = cv2.bitwise_not(holes)
-
             # Combine with original mask
             filled_mask = cv2.bitwise_or(binary, holes_filled)
-
             # Step 2: Separate connected regions (optional erosion/dilation)
             kernel = np.ones((3,3), np.uint8)
-
             # Slight erosion to break thin connections
-            separated = cv2.erode(filled_mask, kernel, iterations=1)
-
+            separated = cv2.erode(filled_mask, kernel, iterations=2)
             # Optional: re-dilate to recover size (if needed)
-            binary = cv2.dilate(separated, kernel, iterations=1)
-
+            binary = cv2.dilate(separated, kernel, iterations=2)
             # Step 3: Label each region (if needed)
             # num_labels, labels = cv2.connectedComponents(separated)
-
-            #####################
+            ###############################################################
 
             # Connected components + stats (fast) — no need to relabel later
             # labels: int32 matrix, stats: [label, x, y, w, h, area]
             num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+            if num_labels <= 1:
+                # No components found, return original binary
+                output_image = np.dstack([binary*0, binary*0, binary*0])
+                res.append(output_image)
+                continue
 
             # Keep only components >= min_area (exclude background label 0)
             keep = np.where(stats[:, cv2.CC_STAT_AREA] >= min_area)[0]
@@ -399,12 +398,12 @@ def test1(sources,loop=False):
 
 if __name__ == "__main__":
     for s in [
-            #    ['../zed_point_clouds.npy'],
+               ['../zed_point_clouds.npy'],
             #    ['./data/bunny.npy'],
-            #    ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
+               ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
                ['../2025-06-12_12-10-25.white.top.center.Csv.npy'],
-            #    ['../2025-06-12_11-58-20.black.top.right.Csv.npy'],
-            #    ['../2025-06-12_11-58-20.black.top.center.Csv.npy'],
+               ['../2025-06-12_11-58-20.black.top.right.Csv.npy'],
+               ['../2025-06-12_11-58-20.black.top.center.Csv.npy'],
             ]:
         print(s)
         test1(s,loop=True)
