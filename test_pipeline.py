@@ -69,8 +69,10 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
     def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo] = [], meta={}) -> List[np.ndarray]:
         self._img_data = []
         for i, pcd in enumerate(pcds_data):
-            z_img_color = np.zeros((self.grid_size,self.grid_size,3),dtype=np.uint8)
             if len(pcd)>0:
+                grid_size = int(len(pcd)** 0.5) if self.grid_size < 0 else self.grid_size
+                # z_img_color = np.zeros((grid_size,grid_size,3),dtype=np.uint8)
+
                 # Use XYZ coordinates only
                 xyz = pcd[:, :3]
                 # Extract Z (depth) channel
@@ -96,11 +98,12 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
                     y_norm = (y - y_min) / (y_max - y_min)
 
                     # Map to grid indices
-                    xi = np.clip((x_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
-                    yi = np.clip((y_norm * (self.grid_size - 1)).astype(np.int32), 0, self.grid_size - 1)
+                    xi = np.clip((x_norm * (grid_size - 1)).astype(np.int32), 0, grid_size - 1)
+                    yi = np.clip((y_norm * (grid_size - 1)).astype(np.int32), 0, grid_size - 1)
 
                     # Initialize grid with NaNs (or large value)
-                    z_grid = np.full((self.grid_size, self.grid_size), np.nan, dtype=np.float32)
+                    z_grid = np.full((grid_size, grid_size), np.nan, dtype=np.float32)
+
 
                     # Assign z to grid cells — here, use last point if collisions
                     z_grid[yi, xi] = z
@@ -116,12 +119,12 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
 
                     z_img = (z_norm * 255).astype(np.uint8)
                     # Optional: apply colormap
-                    z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
-                    z_img_color[z_img==0] = self.bg
-                    z_img_color[:,:,1] = z_img
+                    # z_img_color = cv2.applyColorMap(z_img, cv2.COLORMAP_JET)
+                    # z_img_color[z_img==0] = self.bg
+                    # z_img_color[:,:,1] = z_img
 
                     if self.img_size:
-                        z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
+                        # z_img_color = cv2.resize(z_img_color,(self.img_size,self.img_size))
                         z_img = cv2.resize(z_img,(self.img_size,self.img_size))
                     self._img_data.append(z_img)
             else:
@@ -230,46 +233,96 @@ def test1(sources,loop=False):
     binimg_cls = ImgProcessors.Lambda(title='seg',out_color_type=ColorType.BGR)
     def cleanandfit(imgs_data: List[np.ndarray], imgs_info: List[ImageMatInfo]=[], meta={}):
         res = []
-        for i,binary in enumerate(imgs_data):
-            kernel = np.ones((3, 3), np.uint8)  # Small 3x3 kernel
-            # Apply morphological erosion to reduce noise and thin out the regions
-            binary = cv2.erode(binary, kernel, iterations=2)
-            # Label connected regions
-            labeled = label(binary)
-            min_area = 100  # This can be adjusted depending on the expected size of real regions
-            # Create a new binary image excluding small regions
-            filtered_binary = np.zeros_like(binary)
-            for region in regionprops(labeled):
-                if region.area >= min_area:
-                    coords = region.coords
-                    for r, c in coords:
-                        filtered_binary[r, c] = 255
+        min_area = 1000
 
-            # Relabel the filtered binary image
-            filtered_labeled = label(filtered_binary)
+        for binary in imgs_data:
+            # Ensure single-channel uint8
+            if binary.dtype != np.uint8:
+                binary = binary.astype(np.uint8)
 
-            # Create an output image to plot X-direction center points
-            output_image = np.stack([filtered_binary]*3, axis=-1)
+            # Threshold (binary 0/255)
+            _, binary = cv2.threshold(binary, 127, 255, cv2.THRESH_BINARY)
 
-            # Repeat X-direction center point extraction
-            for region in regionprops(filtered_labeled):
-                minr, minc, maxr, maxc = region.bbox
-                region_mask = (filtered_labeled[minr:maxr, minc:maxc] == region.label)
+            #####################            
+            # Step 1: Fill holes inside regions
+            # Invert mask to find background-connected components
+            holes = cv2.bitwise_not(binary)
 
-                for x in range(region_mask.shape[1]):
-                    y_indices = np.where(region_mask[:, x])[0]
-                    if len(y_indices) > 0:
-                        center_y = int(np.mean(y_indices))
-                        center_x = x
-                        output_image[minr + center_y, minc + center_x] = [0, 255, 0]  # Mark in green
-            
-                # Split each region along Y-direction and plot center of each row segment 
-                for y in range(region_mask.shape[0]):
-                    x_indices = np.where(region_mask[y])[0]
-                    if len(x_indices) > 0:
-                        center_x = int(np.mean(x_indices))
-                        center_y = y
-                        output_image[minr + center_y, minc + center_x] = [255, 0, 0]
+            # Flood fill from top-left corner
+            h, w = holes.shape
+            flood = np.zeros((h+2, w+2), np.uint8)  # Padding needed for floodFill
+            cv2.floodFill(holes, flood, (0, 0), 255)
+
+            # Invert flood-filled to get only the holes
+            holes_filled = cv2.bitwise_not(holes)
+
+            # Combine with original mask
+            filled_mask = cv2.bitwise_or(binary, holes_filled)
+
+            # Step 2: Separate connected regions (optional erosion/dilation)
+            kernel = np.ones((3,3), np.uint8)
+
+            # Slight erosion to break thin connections
+            separated = cv2.erode(filled_mask, kernel, iterations=1)
+
+            # Optional: re-dilate to recover size (if needed)
+            binary = cv2.dilate(separated, kernel, iterations=1)
+
+            # Step 3: Label each region (if needed)
+            # num_labels, labels = cv2.connectedComponents(separated)
+
+            #####################
+
+            # Connected components + stats (fast) — no need to relabel later
+            # labels: int32 matrix, stats: [label, x, y, w, h, area]
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+
+            # Keep only components >= min_area (exclude background label 0)
+            keep = np.where(stats[:, cv2.CC_STAT_AREA] >= min_area)[0]
+            keep = keep[keep != 0]
+
+            # Build filtered binary via label-index lookup (no Python loops)
+            keep_mask = np.zeros(num_labels, dtype=bool)
+            keep_mask[keep] = True
+            filtered_mask = keep_mask[labels]     # boolean mask of kept components
+            filtered_binary = (filtered_mask * 255).astype(np.uint8)
+
+            # Prepare 3-channel output (copy of filtered mask)
+            output_image = np.dstack([filtered_binary, filtered_binary, filtered_binary])
+
+            # For each remaining component, compute centers per column/row in vectorized form
+            for lbl in keep:
+                x = stats[lbl, cv2.CC_STAT_LEFT]
+                y = stats[lbl, cv2.CC_STAT_TOP]
+                w = stats[lbl, cv2.CC_STAT_WIDTH]
+                h = stats[lbl, cv2.CC_STAT_HEIGHT]
+
+                region_mask = (labels[y:y+h, x:x+w] == lbl)
+                if not region_mask.any():
+                    continue
+
+                # Precompute index grids for this region
+                row_idx = np.arange(h, dtype=np.int64)[:, None]   # shape (h,1)
+                col_idx = np.arange(w, dtype=np.int64)[None, :]   # shape (1,w)
+
+                # ---- X-direction: center per column (mark GREEN) ----
+                col_counts = region_mask.sum(axis=0)                               # (w,)
+                valid_cols = col_counts > 0
+                if valid_cols.any():
+                    # sum of row indices per column; integer division matches int(np.mean(...))
+                    sum_rows_per_col = (row_idx * region_mask).sum(axis=0)         # (w,)
+                    cy = (sum_rows_per_col[valid_cols] // col_counts[valid_cols])  # (k,)
+                    cx = np.where(valid_cols)[0]                                   # (k,)
+                    output_image[y + cy, x + cx] = (0, 255, 0)
+
+                # ---- Y-direction: center per row (mark RED) ----
+                row_counts = region_mask.sum(axis=1)                               # (h,)
+                valid_rows = row_counts > 0
+                if valid_rows.any():
+                    sum_cols_per_row = (col_idx * region_mask).sum(axis=1)         # (h,)
+                    cx2 = (sum_cols_per_row[valid_rows] // row_counts[valid_rows]) # (m,)
+                    cy2 = np.where(valid_rows)[0]                                   # (m,)
+                    output_image[y + cy2, x + cx2] = (255, 0, 0)
 
             res.append(output_image)
         return res
@@ -317,12 +370,11 @@ def test1(sources,loop=False):
         # pro3d.processors.Processors.ZDepthViewer(uuid="ZDepthViewer:seg",grid_size=64,img_size=512,
         #                             x_min=-radius,x_max=radius,y_min=-radius,y_max=radius,z_min=-0.50,z_max=0.50,
         #                             save_results_to_meta=True),
-        ZDepthImage(grid_size=224,img_size=224),
-        
+        ZDepthImage(grid_size=-1,img_size=224),
         ImgProcessors.CvImageViewer(title='depth'),
 
         ImgProcessors.NumpyGrayToTorchGray(),
-        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=183-step=58144.ckpt',
+        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=92-step=36735.ckpt',#'./tmp/epoch=183-step=58144.ckpt',
                                     device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
         
@@ -338,7 +390,7 @@ def test1(sources,loop=False):
     while len(pipes)>0:
         measure_fps(gen, func=lambda imgs:pro3d.processors.PointCloudMatProcessors.run_once(
                 imgs,{},pipes),
-                test_duration=200,
+                test_duration=40,
                 title=f"#### profile ####\n{'  ->  '.join([f.title for f in pipes])}")
         return
         pipes.pop()
