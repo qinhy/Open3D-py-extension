@@ -5,6 +5,7 @@ from typing import List, Union
 import cv2
 import numpy as np
 import torch
+import torchvision.transforms as T
 from image_pipeblocks.image_pipeblocks.ImageMat import ColorType, ImageMat, ImageMatInfo, ShapeType
 from image_pipeblocks.image_pipeblocks.processors import Processors as ImgProcessors
 import open3dpypro as pro3d
@@ -48,6 +49,7 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
     y_max:float=math.inf
     z_min:float=math.inf
     z_max:float=math.inf
+    z_mean:float=math.inf
 
     def model_post_init(self, context):
         return super().model_post_init(context)
@@ -66,20 +68,48 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
         ]
         return self.out_mats
     
-    # --------------------------------------------------------------------- #
-    def imgBackToPCD(
-        self,
-        img: Union[np.ndarray, torch.Tensor],
-        funcs: MatOps,
-    ) -> np.ndarray:
-        # Get the indices where the matrix is not zero
-        y_indices, x_indices = np.nonzero(img) # (mat != 0).nonzero(as_tuple=True)
-        # Get the corresponding pixel values
-        values = img[y_indices, x_indices]
-        # Combine x, y, and value
-        pcd_r = funcs.stack((x_indices, y_indices, values),dim=1)
-        return pcd_r
+    # # --------------------------------------------------------------------- #
+    # def imgBackToPCD(
+    #     self,
+    #     idx: int,
+    #     img: Union[np.ndarray, torch.Tensor],
+    #     funcs: MatOps,
+    # ) -> np.ndarray:
+    #     # Get the indices where the matrix is not zero
+    #     y_indices, x_indices = funcs.nonzero(img) # (mat != 0).nonzero(as_tuple=True)
+    #     # Get the corresponding pixel values
+    #     values = img[y_indices, x_indices]
+    #     # Combine x, y, and value
+    #     pcd_r = funcs.stack((x_indices, y_indices, values),dim=1)
+    #     # Convert to homogeneous coordinates
+    #     pcd_r = funcs.stack((pcd_r, funcs.ones(pcd_r.shape[0], dtype=funcs.float32)), dim=1)
+    #     # Apply the inverse transformation 
+    #     T = funcs.mat(self.forward_T[idx], dtype=funcs.float32)
+    #     pcd_r = pcd_r @ T.inverse().T  # (N, 4)
+    #     # Convert back to 3D coordinates
+    #     return pcd_r[:, :3]
     
+    @staticmethod
+    def compute_4x4_homogeneous_transform(x_min, x_max, y_min, y_max, z_min, z_max, grid_size):
+        # Scale and bias for each axis
+        a_x = (grid_size - 1) / (x_max - x_min)
+        b_x = -x_min * a_x
+
+        a_y = (grid_size - 1) / (y_max - y_min)
+        b_y = -y_min * a_y
+
+        a_z = 1.0 / (z_max - z_min)
+        b_z = -z_min * a_z
+
+        # Construct the 4x4 transformation matrix
+        T = [
+            [a_x, 0,   0,   b_x],
+            [0,   a_y, 0,   b_y],
+            [0,   0,   a_z, b_z],
+            [0,   0,   0,   1]
+        ]
+        return T
+
     def pcd2img(
         self,
         pcd: Union[np.ndarray, torch.Tensor],
@@ -90,13 +120,14 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
         device    = pcd.device if is_torch else "cpu"
 
         if pcd is None or len(pcd) == 0:
-            # empty => zero image
             gs = 128 if self.grid_size < 0 else self.grid_size
+            T = funcs.eye(4, dtype=funcs.float32, device=device)  # Identity transform
             if is_torch:
-                depth = funcs.zeros((1,1, gs, gs), dtype=funcs.float16)
+                depth = funcs.zeros((1, 1, gs, gs), dtype=funcs.float16)
             else:
                 depth = funcs.zeros((gs, gs), dtype=funcs.uint8)
-            return depth
+            return depth, T
+        
 
         grid_size = int(len(pcd)** 0.5) if self.grid_size < 0 else self.grid_size
         # Use XYZ coordinates only
@@ -107,49 +138,96 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
         z = self._mat_funcs[0].copy_mat(xyz[:, 2])
 
         # Normalize x and y to [0, 1]
-        x_min = x.min() if self.x_min==self.inf else self.x_min
-        x_max = x.max() if self.x_max==self.inf else self.x_max
-        y_min = y.min() if self.y_min==self.inf else self.y_min
-        y_max = y.max() if self.y_max==self.inf else self.y_max
-        z_min = z.min() if self.z_min==self.inf else self.z_min
-        z_max = z.max() if self.z_max==self.inf else self.z_max
+        self.x_min = x_min = x.min() if self.x_min==self.inf else self.x_min
+        self.x_max = x_max = x.max() if self.x_max==self.inf else self.x_max
+        self.y_min = y_min = y.min() if self.y_min==self.inf else self.y_min
+        self.y_max = y_max = y.max() if self.y_max==self.inf else self.y_max
+        self.z_min = z_min = z.min() if self.z_min==self.inf else self.z_min
+        self.z_max = z_max = z.max() if self.z_max==self.inf else self.z_max
+        self.z_mean = z_mean = float(z.mean()) if self.z_mean==self.inf else self.z_mean
         # xy_min, xy_max = min(x_min,y_min), max(x_max,y_max)
 
-        if not (x_max - x_min < 1e-5 or y_max - y_min < 1e-5 or z_max - z_min < 1e-5):
-            x_norm = (x - x_min) / (x_max - x_min)
-            y_norm = (y - y_min) / (y_max - y_min)
+        if not (x_max - x_min < 1e-5 or y_max - y_min < 1e-5 or z_max - z_min < 1e-5):            
+            T = self.compute_4x4_homogeneous_transform(x_min, x_max, y_min, y_max, z_min, z_max, grid_size)
+            T = funcs.mat(T, dtype=funcs.float32, device=device)  # (4, 4)
 
-            # Map to grid indices
-            xi = funcs.clip(
-                       funcs.astype_int32(x_norm * (grid_size - 1)), 0, grid_size - 1)
-            yi = funcs.clip(
-                       funcs.astype_int32(y_norm * (grid_size - 1)), 0, grid_size - 1)
+            # Convert pcd to homogeneous
+            pcd_hom = funcs.stack([x, y, z, 
+                                 funcs.ones(pcd.shape[0], dtype=funcs.float32, device=device)],
+                                dim=1)  # (N, 4)
+            # Apply transform
+            transformed = pcd_hom @ T.T  # (N, 4)
 
-            z_img = funcs.zeros((grid_size, grid_size), dtype=funcs.float16, device=device)
-
-            # Assign z to grid cells — here, use last point if collisions
-            z = funcs.astype_float16(z)
-            z = (z - z_min) / (z_max - z_min)
-            z_img[yi, xi] = z
+            # Get pixel coordinates and depth
+            xi = funcs.clip(funcs.astype_int32(transformed[:, 0]), 0, grid_size - 1)
+            yi = funcs.clip(funcs.astype_int32(transformed[:, 1]), 0, grid_size - 1)
+            z_norm = transformed[:, 2]
+            # z_norm = (z_norm - z_norm.min()) / (z_norm.max() - z_norm.min())  # Normalize to [0, 1]
+            z_img = funcs.zeros((grid_size, grid_size), dtype=funcs.float32, device=device)
+            z_img[yi, xi] = z_norm
             z_img[z_img == 0] = z_img[z_img > 0].mean()
+            z_img = funcs.clip(z_img, 0, 1)  # Clip to [0, 1]
 
             if not is_torch:
                 z_img = funcs.astype_uint8(z_img * 255)
-                if self.img_size:
-                    z_img = cv2.resize(z_img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
-
+                img_resize = lambda img: cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
             else:
-                z_img = z_img.unsqueeze(0).unsqueeze(0)
-                if self.img_size:
-                    z_img = torch.nn.functional.interpolate(z_img, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
-        return z_img
+                z_img = funcs.astype_float16(z_img.unsqueeze(0).unsqueeze(0))
+                img_resize = lambda img: torch.nn.functional.interpolate(img, 
+                                size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
+                
+            if self.img_size:
+                z_img = img_resize(z_img)                
+                scale = self.img_size / grid_size
+                T_rescale = funcs.mat([
+                    [scale, 0,     0, 0],
+                    [0,     scale, 0, 0],
+                    [0,     0,     1, 0],
+                    [0,     0,     0, 1],
+                ], dtype=funcs.float32, device=device)
+                T = T_rescale @ T
+
+        return z_img,T
 
     def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo] = [], meta={}) -> List[np.ndarray]:
         self._img_data = []
+        self.forward_T=[]
         for i, pcd in enumerate(pcds_data):
-            z_img = self.pcd2img(pcd, self._mat_funcs[i])
+            z_img,T = self.pcd2img(pcd, self._mat_funcs[i])
+            self.forward_T.append(self._mat_funcs[i].to_numpy(T).tolist())
             self._img_data.append(z_img)
         return self._img_data
+
+def filter_inline_points(centerline_points, distance_thresh=2.0):
+    filtered_points = {}
+
+    for lbl, dirs in centerline_points.items():
+        filtered_points[lbl] = {'x': [], 'y': []}
+
+        for direction in ['x', 'y']:
+            points = dirs[direction]
+            if len(points) < 2:
+                continue  # Not enough points to fit
+
+            # Convert to float32 array for OpenCV
+            pts = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+
+            # Fit a line: returns (vx, vy, x0, y0)
+            line = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01)
+            vx, vy, x0, y0 = line.flatten()
+
+            # Compute distances from points to the fitted line
+            dx = pts[:, 0, 0] - x0
+            dy = pts[:, 0, 1] - y0
+            dist = np.abs(vy * dx - vx * dy)  # Perpendicular distance to line
+
+            # Keep points within the distance threshold
+            inlier_mask = dist < distance_thresh
+            inliers = pts[inlier_mask][:, 0]  # shape (n_inliers, 2)
+            inliers = inliers.tolist()  # Convert to list of tuples
+            filtered_points[lbl][direction] = inliers
+
+    return filtered_points
 
 
 def test1(sources,loop=False):
@@ -171,7 +249,6 @@ def test1(sources,loop=False):
 
         meta[ld_direction.uuid] = directions
         return pcds_data
-
     ld_direction._forward_raw=direction
     
     ld_centerz = pro3d.processors.Processors.Lambda(uuid='Lambda:ld_centerz',save_results_to_meta=True)
@@ -199,33 +276,6 @@ def test1(sources,loop=False):
         return res
     ld_filter50cm._forward_raw=filter50cm
     
-    ld_filterz_2 = pro3d.processors.Processors.Lambda()
-    def filterz(pcds_data, pcds_info, meta):
-        res = []
-        for i,pcd in enumerate(pcds_data):
-            z = pcd[:,2]
-            zmean = ld_filterz_2._mat_funcs[i].mean(z)
-            pcd = pcd[ z<(zmean-0.025)]
-
-            res.append(pcd)
-        return res
-    ld_filterz_2._forward_raw=filterz
-    
-    ld_filterNz = pro3d.processors.Processors.Lambda()
-    def filterNz(pcds_data, pcds_info, meta):
-        res = []
-        for i,pcd in enumerate(pcds_data):
-            # z = pcd[:,2]
-            # zmean = ld_filterz._mat_funcs[i].mean(z)
-            z = pcd[:,2]
-            zmedian = ld_filterNz._mat_funcs[i].median(z)
-            c = ~ld_filterNz._mat_funcs[i].logical_and(ld_filterNz._mat_funcs[i].abs(pcd[:,5])<0.90,z<zmedian)
-            # c = ld_filterNz._mat_funcs[i].logical_or(c, z>zmedian)
-            pcd = pcd[c]
-            res.append(pcd)
-        return res
-    ld_filterNz._forward_raw=filterNz
-
     mergedepth = pro3d.processors.Processors.Lambda()
     def merged(pcds_data, pcds_info, meta):
         fu = meta["ZDepthViewer:full"]._img_data
@@ -249,35 +299,13 @@ def test1(sources,loop=False):
 
             # Threshold (binary 0/255)
             _, binary = cv2.threshold(binary, 127, 255, cv2.THRESH_BINARY)
-
-            ###############################################################            
-            # Step 1: Fill holes inside regions
-            # Invert mask to find background-connected components
-            holes = cv2.bitwise_not(binary)
-            # Flood fill from top-left corner
-            h, w = holes.shape
-            flood = np.zeros((h+2, w+2), np.uint8)  # Padding needed for floodFill
-            cv2.floodFill(holes, flood, (0, 0), 255)
-            # Invert flood-filled to get only the holes
-            holes_filled = cv2.bitwise_not(holes)
-            # Combine with original mask
-            filled_mask = cv2.bitwise_or(binary, holes_filled)
-            # Step 2: Separate connected regions (optional erosion/dilation)
-            kernel = np.ones((3,3), np.uint8)
-            # Slight erosion to break thin connections
-            separated = cv2.erode(filled_mask, kernel, iterations=2)
-            # Optional: re-dilate to recover size (if needed)
-            binary = cv2.dilate(separated, kernel, iterations=2)
-            # Step 3: Label each region (if needed)
-            # num_labels, labels = cv2.connectedComponents(separated)
-            ###############################################################
-
+            ###############################################################  
             # Connected components + stats (fast) — no need to relabel later
             # labels: int32 matrix, stats: [label, x, y, w, h, area]
             num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
             if num_labels <= 1:
                 # No components found, return original binary
-                output_image = np.zeros_like(binary, dtype=np.uint8)
+                output_image = np.dstack([binary, binary, binary])
                 res.append(output_image)
                 continue
 
@@ -291,12 +319,16 @@ def test1(sources,loop=False):
 
             ###############################################################       
             # Prepare 3-channel output (copy of filtered mask)
-            filtered_mask = keep_mask[labels]     # boolean mask of kept components
-            filtered_binary = (filtered_mask * 255).astype(np.uint8)
-            output_image = np.dstack([filtered_binary, filtered_binary, filtered_binary])
+            # filtered_mask = keep_mask[labels]     # boolean mask of kept components
+            # filtered_binary = (filtered_mask * 255).astype(np.uint8)
+            output_image = np.dstack([binary, binary, binary])
             # output_image = np.zeros((binary.shape[0], binary.shape[1], 3), dtype=np.uint8)
 
-            # For each remaining component, compute centers per column/row in vectorized form
+            centerline_points = {
+                lbl: {'x': [], 'y': []}
+                for lbl in keep
+            }
+
             for lbl in keep:
                 x = stats[lbl, cv2.CC_STAT_LEFT]
                 y = stats[lbl, cv2.CC_STAT_TOP]
@@ -304,57 +336,68 @@ def test1(sources,loop=False):
                 h = stats[lbl, cv2.CC_STAT_HEIGHT]
 
                 region_mask = (labels[y:y+h, x:x+w] == lbl)
-                if not region_mask.any(): continue
+                if not region_mask.any():
+                    continue
 
-                # Precompute index grids for this region
-                row_idx = np.arange(h, dtype=np.int64)[:, None]   # shape (h,1)
-                col_idx = np.arange(w, dtype=np.int64)[None, :]   # shape (1,w)
+                row_idx = np.arange(h, dtype=np.int64)[:, None]  # (h,1)
+                col_idx = np.arange(w, dtype=np.int64)[None, :]  # (1,w)
 
-                # ---- X-direction: center per column (mark GREEN) ----
-                col_counts = region_mask.sum(axis=0)                               # (w,)
+                # X-direction (per column)
+                col_counts = region_mask.sum(axis=0)
                 valid_cols = col_counts > 0
-                if valid_cols.any() and  "_x" in directions[idx]:
-                    # sum of row indices per column; integer division matches int(np.mean(...))
-                    sum_rows_per_col = (row_idx * region_mask).sum(axis=0)         # (w,)
-                    cy = (sum_rows_per_col[valid_cols] // col_counts[valid_cols])  # (k,)
-                    cx = np.where(valid_cols)[0]                                   # (k,)
-                    output_image[y + cy, x + cx] = (255, 0, lbl)
+                if valid_cols.any() and "_x" in directions[idx]:
+                    sum_rows_per_col = (row_idx * region_mask).sum(axis=0)
+                    cy = sum_rows_per_col[valid_cols] // col_counts[valid_cols]
+                    cx = np.where(valid_cols)[0]
+                    points = list(zip(x + cx, y + cy))
+                    centerline_points[lbl]['x'].extend(points)
 
-                # ---- Y-direction: center per row (mark RED) ----
-                row_counts = region_mask.sum(axis=1)                               # (h,)
+                # Y-direction (per row)
+                row_counts = region_mask.sum(axis=1)
                 valid_rows = row_counts > 0
-                if valid_rows.any() and  "_y" in directions[idx]:
-                    sum_cols_per_row = (col_idx * region_mask).sum(axis=1)         # (h,)
-                    cx2 = (sum_cols_per_row[valid_rows] // row_counts[valid_rows]) # (m,)
-                    cy2 = np.where(valid_rows)[0]                                  # (m,)
-                    output_image[y + cy2, x + cx2] = (0, 255, lbl)
+                if valid_rows.any() and "_y" in directions[idx]:
+                    sum_cols_per_row = (col_idx * region_mask).sum(axis=1)
+                    cx2 = sum_cols_per_row[valid_rows] // row_counts[valid_rows]
+                    cy2 = np.where(valid_rows)[0]
+                    points = list(zip(x + cx2, y + cy2))
+                    centerline_points[lbl]['y'].extend(points)
+ 
+            ###############################################################
+            # Drawing points:
+            filtered_centerline_points = filter_inline_points(centerline_points, distance_thresh=2.0)
+            meta[binimg_cls.uuid] = filtered_centerline_points
+
+            for lbl, dirs in filtered_centerline_points.items():
+                for px, py in dirs['x']:
+                    output_image[int(py), int(px)] = (0, 255, 0)  # GREEN
+                for px, py in dirs['y']:
+                    output_image[int(py), int(px)] = (0, 0, 255)  # RED
 
             res.append(output_image)
-            # res+= [output_image[..., 0], output_image[..., 1]]            
-            ###############################################################
-            # directions = meta.get(ld_direction.uuid, [])
-            # if len(directions) > 0:
-            #     # Draw direction arrows on the output image
-            #     for j, direction in enumerate(directions):
-            #         if "_x" in direction:
-            #             tmp = output_image[..., 0]
-            #         elif "_y" in direction:
-            #             tmp = output_image[..., 1]
-            #     res.append(tmp)
+        
         return res
     binimg_cls._forward_raw=cleanandfit
 
 
     ld_back2Pcd = pro3d.processors.Processors.Lambda()
-    def back2Pcd(imgs_data, imgs_info, meta):
+    def back2Pcd(pcds_data, pcds_info, meta):
         res = []
-        forwardTs = []
-        for i in ["PlaneNormalize:pn",]:
-            pass
-
-        for i,pcd in enumerate(imgs_data):
-            pass
-        return res    
+        zi:ZDepthImage = meta.get('ZDepthImage:zi', None)
+        z_mean = 1.0#zi.z_mean
+        filtered_centerline_points = meta.get(binimg_cls.uuid, {})
+        for lbl, dirs in filtered_centerline_points.items():
+            for dir in ['x', 'y']:
+                if dir not in dirs: continue
+                points = dirs[dir]
+                if len(points) == 0: continue
+                # Convert points to homogeneous coordinates
+                points_homogeneous = np.array([[px, py, z_mean, 1] for px, py in points], dtype=np.float32)
+                # Apply the inverse transformation
+                T = np.linalg.inv(np.array(zi.forward_T[0], dtype=np.float32))
+                transformed_points = points_homogeneous @ T.T
+                res.append(transformed_points[:, :3])  # Keep only XYZ coordinates
+        res += pcds_data
+        return res
     ld_back2Pcd._forward_raw=back2Pcd
 
 
@@ -382,7 +425,7 @@ def test1(sources,loop=False):
     ]
 
     pip_gpu_zdepth = [
-        ZDepthImage(grid_size=-1),
+        ZDepthImage(uuid="ZDepthImage:zi",grid_size=-1,save_results_to_meta=True),
         ImgProcessors.TorchResize(target_size=(224, 224)),
     ]
 
@@ -406,6 +449,8 @@ def test1(sources,loop=False):
 
     pipe_post_pcd = [
         pro3d.processors.Processors.TorchToNumpy(),
+        ld_back2Pcd,
+        pro3d.processors.Processors.MergePCDs(),
         pro3d.processors.Processors.O3DStreamViewer(),
     ]
     
@@ -432,9 +477,11 @@ def test1(sources,loop=False):
                 
             for fn in pipe_vis_segdepth:
                 segimgs,meta = (fn.validate if validate else fn)(segimgs,meta)
-                
+
             for fn in pipe_post_pcd:
+                print(f"Processing {fn.uuid} with {len(pcds)} point clouds")
                 pcds,meta = (fn.validate if validate else fn)(pcds,meta)
+                print(f"Processing {fn.uuid} with {len(pcds)} out point clouds")
         except Exception as e:
             print(f"Error in processing {fn.uuid}: {e}")
             raise e
@@ -446,7 +493,7 @@ def test1(sources,loop=False):
 
     while len(pipes)>0:
         measure_fps(gen, func=lambda imgs:run_once(imgs,{},pipes),
-                test_duration=20,
+                test_duration=200,
                 title=f"#### profile ####\n{'  ->  '.join([f.title for ff in pipes for f in ff])}")
         return
         pipes.pop()
@@ -455,7 +502,7 @@ def test1(sources,loop=False):
 
 if __name__ == "__main__":
     for s in [
-               ['../zed_point_clouds.npy'],
+            #    ['../zed_point_clouds.npy'],
             #    ['./data/bunny.npy'],
                ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
                ['../2025-06-12_12-10-25.white.top.center.Csv.npy'],

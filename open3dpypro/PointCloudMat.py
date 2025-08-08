@@ -280,7 +280,7 @@ class MatOps:
     def dot(self, a, b): raise NotImplementedError()
     def cross(self, a, b): raise NotImplementedError()
     def matmul(self, a, b): raise NotImplementedError()
-    def to_numpy(self, x): raise NotImplementedError()
+    def to_numpy(self, x)->np.ndarray: raise NotImplementedError()
     def mean(self, x, dim=0): raise NotImplementedError()
     def median(self, x, dim=0): raise NotImplementedError()
     def std(self, x, dim=0): raise NotImplementedError()
@@ -298,6 +298,7 @@ class MatOps:
     def astype_uint8(self, x): raise NotImplementedError()
     def astype_float32(self, x): raise NotImplementedError()    
     def astype_float16(self, x): raise NotImplementedError()
+    def nonzero(self, x): raise NotImplementedError()
 
 class NumpyMatOps(MatOps):
     int32=np.int32
@@ -313,7 +314,7 @@ class NumpyMatOps(MatOps):
     def dot(self, a, b): return np.dot(a, b)
     def cross(self, a, b): return np.cross(a, b)
     def matmul(self, a, b): return a @ b
-    def to_numpy(self, x): return x
+    def to_numpy(self, x)->np.ndarray: return x
     def mean(self, x, dim=0): return np.mean(x, axis=dim)
     def median(self, x, dim=0): return np.median(x, axis=dim)
     def std(self, x, dim=0): return np.std(x, axis=dim)
@@ -329,8 +330,10 @@ class NumpyMatOps(MatOps):
     def clip(self, x, min_val, max_val): return np.clip(x, min_val, max_val)  
     def astype_int32(self, x): return x.astype(np.int32)
     def astype_uint8(self, x): return x.astype(np.uint8)
-    def astype_float32(self, x): return x.astype(np.float32)    
+    def astype_float32(self, x): return x.astype(np.float32)        
     def astype_float16(self, x): return x.astype(np.float16)
+    def nonzero(self, x) : return np.nonzero(x)
+
 
 class TorchMatOps(MatOps):
     int32=torch.int32
@@ -346,7 +349,7 @@ class TorchMatOps(MatOps):
     def dot(self, a, b): return torch.dot(a, b)
     def cross(self, a, b): return torch.cross(a, b)
     def matmul(self, a, b): return torch.matmul(a, b)
-    def to_numpy(self, x): return x.detach().cpu().numpy()
+    def to_numpy(self, x)->np.ndarray: return x.detach().cpu().numpy()
     def mean(self, x, dim=0): return torch.mean(x, dim=dim)
     def median(self, x, dim=0): return torch.median(x, dim=dim).values
     def std(self, x, dim=0): return torch.std(x, dim=dim, unbiased=False)
@@ -364,6 +367,8 @@ class TorchMatOps(MatOps):
     def astype_uint8(self, x): return x.type(dtype=torch.uint8)
     def astype_float32(self, x): return x.type(dtype=torch.float32)
     def astype_float16(self, x): return x.type(dtype=torch.float16)
+    def nonzero(self, x) : return torch.nonzero(x)
+
 
 
 class PointCloudMatProcessor(BaseModel):
