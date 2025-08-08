@@ -121,9 +121,9 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
 
             # Map to grid indices
             xi = funcs.clip(
-                funcs.astype_int32(x_norm * (grid_size - 1)), 0, grid_size - 1)
+                       funcs.astype_int32(x_norm * (grid_size - 1)), 0, grid_size - 1)
             yi = funcs.clip(
-                funcs.astype_int32(y_norm * (grid_size - 1)), 0, grid_size - 1)
+                       funcs.astype_int32(y_norm * (grid_size - 1)), 0, grid_size - 1)
 
             z_img = funcs.zeros((grid_size, grid_size), dtype=funcs.float16, device=device)
 
@@ -131,6 +131,7 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
             z = funcs.astype_float16(z)
             z = (z - z_min) / (z_max - z_min)
             z_img[yi, xi] = z
+            z_img[z_img == 0] = z_img[z_img > 0].mean()
 
             if not is_torch:
                 z_img = funcs.astype_uint8(z_img * 255)
@@ -138,7 +139,7 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
                     z_img = cv2.resize(z_img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
             else:
-                z_img = z_img.unsqueeze(0).unsqueeze(0)                
+                z_img = z_img.unsqueeze(0).unsqueeze(0)
                 if self.img_size:
                     z_img = torch.nn.functional.interpolate(z_img, size=(self.img_size, self.img_size), mode='bilinear', align_corners=False)
         return z_img
@@ -325,7 +326,7 @@ def test1(sources,loop=False):
                 if valid_rows.any() and  "_y" in directions[idx]:
                     sum_cols_per_row = (col_idx * region_mask).sum(axis=1)         # (h,)
                     cx2 = (sum_cols_per_row[valid_rows] // row_counts[valid_rows]) # (m,)
-                    cy2 = np.where(valid_rows)[0]                                   # (m,)
+                    cy2 = np.where(valid_rows)[0]                                  # (m,)
                     output_image[y + cy2, x + cx2] = (0, 255, lbl)
 
             res.append(output_image)
@@ -386,7 +387,7 @@ def test1(sources,loop=False):
     ]
 
     pip_gpu_seg = [
-        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=92-step=36735.ckpt',
+        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=183-step=58144.ckpt',
                 #'./tmp/epoch=2-step=948.ckpt',#'./tmp/epoch=183-step=58144.ckpt',epoch=92-step=36735.ckpt
                 device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
