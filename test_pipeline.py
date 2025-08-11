@@ -446,9 +446,9 @@ def test1(sources,loop=False):
         ImgProcessors.TorchResize(target_size=(224, 224)),
         ImgProcessors.BackUp(uuid="BackUp:depth",device='cpu'),
 
-        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=183-step=58144.ckpt',
-                #'./tmp/epoch=2-step=948.ckpt',#'./tmp/epoch=183-step=58144.ckpt',epoch=92-step=36735.ckpt
-                device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
+        # ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=183-step=58144.ckpt',
+        #         #'./tmp/epoch=2-step=948.ckpt',#'./tmp/epoch=183-step=58144.ckpt',epoch=92-step=36735.ckpt
+        #         device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
         #### GPU end
 

@@ -162,3 +162,5 @@ data/test_mesh
 point_cloud_PLY_25264798_1080_16-06-2025-09-20-36.pcd
 /tmp
 /downloaded_objs
+pcd_main.py
+ros_main.py
