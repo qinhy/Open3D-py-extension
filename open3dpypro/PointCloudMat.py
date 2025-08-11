@@ -121,7 +121,7 @@ class PointCloudMatInfo(BaseModel):
 class PointCloudMat(BaseModel):
     shape_type: ShapeType
     info: Optional[PointCloudMatInfo] = None
-    _pcd_data: np.ndarray | torch.Tensor = None
+    _pcd_data: Union[np.ndarray , torch.Tensor] = None
 
     shmIO_mode: Literal[False, 'writer', 'reader'] = False
     shmIO_writer: Optional[NumpyFloat32SharedMemoryStreamIO.Writer] = None
@@ -262,7 +262,7 @@ class PointCloudMat(BaseModel):
         if self.info.shape_type != shape_type:
             raise TypeError(f"Expected shape type {shape_type.value}, got {self.info.shape_type.value}")
 
-    def require_shape_types(self, shape_types: list[ShapeType]):
+    def require_shape_types(self, shape_types: List[ShapeType]):
         if self.info.shape_type in shape_types:
             raise TypeError(f"Expected shape types {shape_types}, got {self.info.shape_type.value}")
 
@@ -389,7 +389,7 @@ class PointCloudMatProcessor(BaseModel):
 
     forward_T:List[ List[List[float]] ]=[]
 
-    _mat_funcs:list[MatOps] = []
+    _mat_funcs:List[MatOps] = []
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

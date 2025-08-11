@@ -8,7 +8,7 @@ import json
 import math
 from multiprocessing import shared_memory
 import multiprocessing
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 # ===============================
 # Third-Party Library Imports
@@ -69,10 +69,10 @@ class Processors:
 
         def forward_raw(
             self,
-            pcds_data: List[np.ndarray|torch.Tensor],
+            pcds_data: List[Union[np.ndarray, torch.Tensor]],
             pcds_info: Optional[List[PointCloudMatInfo]] = None,
             meta: Optional[dict] = None
-        ) -> List[np.ndarray|torch.Tensor]:
+        ) -> List[Union[np.ndarray, torch.Tensor]]:
             self._backup_mats = []
             for i,pcd in enumerate(pcds_data):
                 pcd = self._mat_funcs[i].copy_mat(pcd)
@@ -123,7 +123,7 @@ class Processors:
         
     class CPUNormals(PointCloudMatProcessor):
         title:str='cpu_calc_normals'
-        input_shape_types: list['ShapeType'] = []
+        input_shape_types: List['ShapeType'] = []
         
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
             pcd.require_ndarray()
@@ -147,7 +147,7 @@ class Processors:
     class TorchNormals(PointCloudMatProcessor):
         title:str='torch_calc_normals'
         k: int = 16
-        input_shape_types: list['ShapeType'] = []
+        input_shape_types: List['ShapeType'] = []
         
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
             pcd.require_torch_float()
@@ -257,8 +257,8 @@ class Processors:
                 self.devices_info()
                 self.build()
 
-        def forward_raw(self, pcds_data: List[np.ndarray|torch.Tensor], 
-                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray|torch.Tensor]:
+        def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], 
+                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[Union[np.ndarray, torch.Tensor]]:
             res = []
             for i,pcd in enumerate(pcds_data):
                 model = self._models[i]
@@ -303,8 +303,8 @@ class Processors:
                 self.devices_info()
                 self.build()
 
-        def forward_raw(self, pcds_data: List[np.ndarray|torch.Tensor], 
-                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray|torch.Tensor]:
+        def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], 
+                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[Union[np.ndarray, torch.Tensor]]:
             res = []
             for i,pcd in enumerate(pcds_data):
                 model = self._models[i]
@@ -361,8 +361,8 @@ class Processors:
                 self.devices_info()
                 self.build()
 
-        def forward_raw(self, pcds_data: List[np.ndarray|torch.Tensor], 
-                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray|torch.Tensor]:
+        def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], 
+                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[Union[np.ndarray, torch.Tensor]]:
             res = []
             for i,pcd in enumerate(pcds_data):
                 model = self._models[i]
@@ -399,7 +399,7 @@ class Processors:
         title:str='plane_detection'
         distance_threshold: float = 0.01
         arange: bool = False
-        best_planes:list[list[float]] = []
+        best_planes:List[List[float]] = []
         alpha:float = 0.0
         num_iterations:int = 512
         num_iteration_batch:int = 256
@@ -572,8 +572,8 @@ class Processors:
                 self.build()
             self.best_planes.append([0.,0.,0.,0.])
 
-        def forward_raw(self, pcds_data: List[np.ndarray|torch.Tensor], 
-                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray|torch.Tensor]:
+        def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], 
+                        pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[Union[np.ndarray, torch.Tensor]]:
             for i,pcd in enumerate(pcds_data):
                 model = self._models[i]
                 plane = model(pcd)
@@ -653,7 +653,7 @@ class Processors:
         
     class SimpleSegConnectedComponents(PointCloudMatProcessor):
         title:str='simple_seg_connected_components'
-        plane: list[float] = [0,0,1.0,0.0]
+        plane: List[float] = [0,0,1.0,0.0]
         thickness: float = 0.05
         resolution: float = 0.1
         minpoints: int = 20
@@ -717,7 +717,7 @@ class Processors:
         
     class ZDepthViewer(PointCloudMatProcessor):
         title: str = 'z_depth_viewer'
-        bg:tuple[int,int,int] = (0,0,0) # (125,125,125)
+        bg:Tuple[int,int,int] = (0,0,0) # (125,125,125)
         grid_size: int = 256  # Grid resolution (e.g., 256 x 256)
         img_size:int=0
         _img_data:list=[]
@@ -811,7 +811,7 @@ class Processors:
         axis_size: float = 0.5
         _vis:Any = None
         _axis:Any = None        
-        _pchs:list[PointCloud] = []
+        _pchs:List[PointCloud] = []
 
         def model_post_init(self, context):
             res = super().model_post_init(context)
@@ -1035,18 +1035,18 @@ class Processors:
 
 class PointCloudMatProcessors(BaseModel):
     @staticmethod    
-    def dumps(pipes:list[PointCloudMatProcessor]):
+    def dumps(pipes:List[PointCloudMatProcessor]):
         return json.dumps([p.model_dump() for p in pipes])
     
     @staticmethod
-    def loads(pipes_json:str)->list[PointCloudMatProcessor]:
+    def loads(pipes_json:str)->List[PointCloudMatProcessor]:
         processors = {k: v for k, v in Processors.__dict__.items() if '__' not in k}
         return [processors[f'{p["uuid"].split(":")[0]}'](**p) 
                 for p in json.loads(pipes_json)]
 
     @staticmethod    
     def run_once(imgs,meta={},
-            pipes:list['PointCloudMatProcessor']=[],
+            pipes:List['PointCloudMatProcessor']=[],
             validate=False):
         try:
             for fn in pipes:
@@ -1058,7 +1058,7 @@ class PointCloudMatProcessors(BaseModel):
         
     @staticmethod    
     def run(gen,
-            pipes:list['PointCloudMatProcessor']=[],
+            pipes:List['PointCloudMatProcessor']=[],
             meta = {},validate_once=False):
         if isinstance(pipes, str):
             pipes = PointCloudMatProcessors.loads(pipes)
@@ -1068,7 +1068,7 @@ class PointCloudMatProcessors(BaseModel):
 
     @staticmethod    
     def validate_once(gen,
-            pipes:list['PointCloudMatProcessor']=[]):
+            pipes:List['PointCloudMatProcessor']=[]):
         PointCloudMatProcessors.run(gen,pipes,validate_once=True)
 
     @staticmethod
@@ -1080,7 +1080,7 @@ class PointCloudMatProcessors(BaseModel):
                 imgs,meta = fn(imgs,meta)
 
     @staticmethod
-    def run_async(pipes: list[PointCloudMatProcessor] | str):
+    def run_async(pipes: Union[str, List[PointCloudMatProcessor]]):
         if isinstance(pipes, str):
             pipes_serialized = pipes
         else:

@@ -3,7 +3,7 @@ import threading
 import uuid
 import open3d as o3d
 import numpy as np
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 class PointCloudBase:
     COLOR_CHART = np.asarray([[230,0,18],[233,49,9],[235,97,0],[239,125,0],[243,152,0],[248,176,0],[252,200,0],[254,226,0],[255,251,0],[231,235,0],[207,219,0],[175,207,16],[143,195,31],[89,184,44],[34,172,56],[17,163,62],[0,153,68],[0,154,88],[0,155,107],[0,157,129],[0,158,150],[0,159,172],[0,160,193],[0,160,213],[0,160,233],[0,147,221],[0,134,209],[0,119,196],[0,104,183],[0,88,170],[0,71,157],[15,52,147],[29,32,136],[63,29,135],[96,25,134],[121,16,133],[146,7,131],[168,4,130],[190,0,129],[209,0,128],[228,0,127],[229,0,117],[229,0,106],[229,0,93],[229,0,79],[230,0,65],[230,0,51]])
@@ -72,7 +72,7 @@ class PointCloudBase:
             self.pcd.estimate_normals(param)
         return self
     
-    def segment_plane(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450) -> tuple[list, np.ndarray]:
+    def segment_plane(self, thickness: float = 0.01, ransac_n: int = 3, num_iterations: int = 450) -> Tuple[List, np.ndarray]:
         [a, b, c, d],inlines_idx = self.pcd.segment_plane(distance_threshold=thickness,ransac_n=ransac_n,num_iterations=num_iterations)
         return [a, b, c, d],inlines_idx                   
                   

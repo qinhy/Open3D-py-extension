@@ -3,29 +3,30 @@ name = "open3d-py-extension"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.8"
 dependencies = [
-    "torch==2.5.0+cu124",
-    "torchvision==0.20.0+cu124",
-    "laspy>=2.6.1",
+    "torch==2.4.1+cu124",
+    "torchvision==0.19.1+cu124",
+    "laspy>=2.5.4",
     "open3d>=0.19.0",
     "opencv-python>=4.12.0.88",
-    "pydantic>=2.11.7",
-    "pye57>=0.4.17",
-    "objaverse>=0.1.7",
-    "scikit-image>=0.25.2",
+    "pydantic>=2.10",
+    "pye57>=0.4.15",
+    "scikit-image>=0.21.0",
+    "pytorch-lightning>=2.4.0",
 ]
 
 [dependency-groups]
 dev = [
-    "imageio>=2.37.0",
-    "ipython>=9.4.0",
+    "objaverse>=0.1.7",
+    "imageio>=2.35.1",
+    "ipython>=8.0.0",
     "pyopengl>=3.1.0",
     "pyrender>=0.1.45",
-    "pytorch-lightning>=2.5.2",
-    "segmentation-models-pytorch>=0.5.0",
+    "pytorch-lightning>=2.4.0",
     "trimesh>=4.7.1",
     "ultralytics>=8.3.174",
+    "segmentation-models-pytorch>=0.3.3",
 ]
 
 [tool.uv.sources]

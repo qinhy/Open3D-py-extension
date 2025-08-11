@@ -119,7 +119,7 @@ class PointCloudMatGenerator(BaseModel):
         return None  # Streaming generator — length not defined
     
 class NumpyRawFrameFileGenerator(PointCloudMatGenerator):
-    shape_types: list['ShapeType']
+    shape_types: List['ShapeType']
     loop:bool=True
     def create_frame_generator(self, idx,source):
         arr = np.load(source)
