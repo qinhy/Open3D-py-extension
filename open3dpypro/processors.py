@@ -651,6 +651,7 @@ class Processors:
 
     class Lambda(PointCloudMatProcessor):
         title:str='lambda'
+        config:dict={}
         _forward_raw:Callable = lambda pcds_data, pcds_info, meta:None
 
         def validate_pcd(self, idx, pcd:PointCloudMat):
