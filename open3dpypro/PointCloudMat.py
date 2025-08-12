@@ -488,7 +488,7 @@ class PointCloudMatProcessor(BaseModel):
             ]
         else:
             raise ValueError(
-                f"Length mismatch: {len(validated_pcds)} vs {len(converted_raw_pcds)}"
+                f"[{self.uuid}] Length mismatch: {len(validated_pcds)} vs {len(converted_raw_pcds)}"
             )
         return self.out_mats
 
