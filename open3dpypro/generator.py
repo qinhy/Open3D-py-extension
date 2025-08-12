@@ -1,17 +1,12 @@
 import json
 import multiprocessing
-import os
-import sys
-import glob
 import time
 import uuid
-import platform
-from enum import IntEnum
-from typing import Iterator, List, Literal, Optional
+from typing import Iterator, List, Literal
 
-import cv2
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+import queue
 
 from .PointCloudMat import ShapeType, PointCloudMat
 
@@ -145,6 +140,101 @@ class NumpyRawFrameFileGenerator(PointCloudMatGenerator):
                 cnt+=1
         return gen()
 
+RosPointCloud2Generator = None
+try:
+    import rospy
+    from sensor_msgs.msg import PointCloud2
+    from sensor_msgs import point_cloud2 as pc2
+
+    class _SubWrapper:
+        """Small wrapper so your generic resource cleanup finds a .close()."""
+        def __init__(self, sub):
+            self._sub = sub
+        def close(self):
+            try:
+                self._sub.unregister()
+            except Exception:
+                pass
+
+    class RosPointCloud2Generator(PointCloudMatGenerator):
+        """
+        Read PointCloud2 from ROS Noetic topics.
+
+        sources: List[str]  -> ROS topic names (e.g. "/lidar/points")
+        shape_types: List[ShapeType] -> one per source (same as your base)
+        """
+        queue_size: int = 4
+        ros_node_name: str = "RosPointCloud2Generator"
+
+        def _ensure_ros(self):
+            if rospy is None or pc2 is None:
+                raise ImportError(
+                    "ROS (rospy, sensor_msgs.point_cloud2) not available. "
+                    f"Import error: {_ros_import_error!r}"
+                )
+            # init_node can only be called once per process; guard it
+            if not rospy.core.is_initialized():
+                # disable_signals=True so it plays nice inside libraries/subprocesses
+                rospy.init_node(f"{self.ros_node_name}_{self.uuid.replace(':','_')}",
+                                anonymous=True, disable_signals=True)
+
+        def _msg_to_numpy(self, msg: PointCloud2) -> np.ndarray:
+            """
+            Convert PointCloud2 -> (N,3) float32 array [x,y,z], drop NaNs.
+            """
+            # Fast path: read x,y,z; skip NaNs at source
+            gen = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
+            # np.fromiter is ~2x faster than np.array(list(...)) for large clouds
+            arr = np.fromiter(gen, dtype=np.float32, count=-1)
+            if arr.size == 0:
+                return np.empty((0, 3), dtype=np.float32)
+            arr = arr.reshape((-1, 3))
+            # Ensure contiguous (your code calls np.ascontiguousarray downstream)
+            return np.ascontiguousarray(arr)
+
+        def create_frame_generator(self, idx, source) -> Iterator[np.ndarray]:
+            """
+            source is a ROS topic name publishing sensor_msgs/PointCloud2.
+            """
+            self._ensure_ros()
+
+            q: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=self.queue_size)
+
+            def cb(msg: PointCloud2):
+                try:
+                    frame = self._msg_to_numpy(msg)
+                    # Drop oldest if full to avoid stalling callback thread
+                    try:
+                        q.put_nowait(frame)
+                    except queue.Full:
+                        _ = q.get_nowait()
+                        q.put_nowait(frame)
+                except Exception as e:
+                    logger(f"[{self.uuid}] PointCloud2 conversion error on {source}: {e}")
+
+            sub = rospy.Subscriber(source, PointCloud2, cb, queue_size=1)
+            # Ensure we clean it up later
+            self.register_resource(_SubWrapper(sub))
+
+            def gen(qref=q):
+                # Keep yielding as long as ROS is alive; this is a live stream
+                while not rospy.is_shutdown():
+                    try:
+                        frame = qref.get(timeout=1.0)
+                        yield frame
+                    except queue.Empty:
+                        # No data yet; keep trying (streaming source)
+                        continue
+
+            return gen()
+
+except Exception as e:
+    rospy = None
+    PointCloud2 = None
+    pc2 = None
+    _ros_import_error = e
+    print(f"ROS PointCloud2 generator not available: {e}")
+
 class PointCloudMatGenerators(BaseModel):
 
     @staticmethod
@@ -155,6 +245,7 @@ class PointCloudMatGenerators(BaseModel):
     def loads(gen_json:str)->PointCloudMatGenerator:
         gen = {
             'NumpyRawFrameFileGenerator':NumpyRawFrameFileGenerator,
+            'RosPointCloud2Generator': RosPointCloud2Generator,
         }
         g = json.loads(gen_json)
         return gen[f'{g["uuid"].split(":")[0]}'](**g) 
