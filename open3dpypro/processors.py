@@ -849,6 +849,190 @@ class Processors:
             self._vis.destroy_window()
             return super().release()
 
+    try:
+        import rospy
+        from std_msgs.msg import Header
+        from sensor_msgs.msg import PointField, PointCloud2
+        import sensor_msgs.point_cloud2 as pc2
+
+
+        def _ensure_numpy_xyz(arr) -> np.ndarray:
+            """Accepts np.ndarray or torch.Tensor with at least 3 columns. Returns float32 Nx3 numpy array."""
+            if torch is not None and isinstance(arr, torch.Tensor):
+                arr = arr.detach().to('cpu').contiguous().numpy()
+            if not isinstance(arr, np.ndarray):
+                raise TypeError("Point cloud must be numpy array or torch tensor")
+            if arr.ndim != 2 or arr.shape[1] < 3:
+                raise ValueError(f"Expected shape (N, >=3). Got {arr.shape}")
+            xyz = np.ascontiguousarray(arr[:, :3].astype(np.float32))
+            return xyz
+
+
+        def _pack_rgb_uint8_to_float32(rgb_uint8: np.ndarray) -> np.ndarray:
+            """Pack Nx3 uint8 -> float32 rgb field as in PCL/ROS (same bit layout)."""
+            if rgb_uint8.dtype != np.uint8 or rgb_uint8.shape[1] != 3:
+                raise ValueError("rgb must be Nx3 uint8")
+            # Pack into a single uint32: r<<16 | g<<8 | b
+            r = rgb_uint8[:, 0].astype(np.uint32)
+            g = rgb_uint8[:, 1].astype(np.uint32)
+            b = rgb_uint8[:, 2].astype(np.uint32)
+            rgb_uint32 = (r << 16) | (g << 8) | b
+            # Reinterpret as float32
+            rgb_float = rgb_uint32.view(np.float32)
+            return rgb_float
+
+
+        def numpy_to_pointcloud2(
+            xyz: np.ndarray,
+            *,
+            frame_id: str = "map",
+            stamp: Optional[rospy.Time] = None,
+            rgb: Optional[np.ndarray] = None,           # Nx3 uint8
+            intensity: Optional[np.ndarray] = None      # N float32
+        ) -> PointCloud2:
+            """
+            Build a sensor_msgs/PointCloud2 with fields: x,y,z and optional rgb or intensity.
+            Prefer either rgb or intensity (both is supported too).
+            """
+            xyz = _ensure_numpy_xyz(xyz)  # ensures float32 Nx3
+            n = xyz.shape[0]
+
+            fields = [
+                PointField('x', 0, PointField.FLOAT32, 1),
+                PointField('y', 4, PointField.FLOAT32, 1),
+                PointField('z', 8, PointField.FLOAT32, 1),
+            ]
+            point_step = 12
+            extras = []
+
+            if rgb is not None:
+                rgb = np.ascontiguousarray(rgb)
+                if rgb.dtype == np.float32 and rgb.shape[1] == 1:
+                    rgb_f = rgb.reshape(-1)
+                elif rgb.dtype == np.uint8 and rgb.shape[1] == 3:
+                    rgb_f = _pack_rgb_uint8_to_float32(rgb)
+                else:
+                    raise ValueError("rgb must be Nx3 uint8 or Nx1 float32 (packed).")
+                if rgb_f.shape[0] != n:
+                    raise ValueError("rgb length must match xyz rows.")
+                fields.append(PointField('rgb', point_step, PointField.FLOAT32, 1))
+                point_step += 4
+                extras.append(rgb_f.astype(np.float32))
+
+            if intensity is not None:
+                intensity = np.ascontiguousarray(intensity).astype(np.float32).reshape(-1)
+                if intensity.shape[0] != n:
+                    raise ValueError("intensity length must match xyz rows.")
+                fields.append(PointField('intensity', point_step, PointField.FLOAT32, 1))
+                point_step += 4
+                extras.append(intensity)
+
+            # Interleave into one structured byte array
+            if extras:
+                stacked = np.column_stack([xyz] + [e.reshape(-1, 1) if e.ndim == 1 else e for e in extras])
+                data = stacked.tobytes()
+            else:
+                data = xyz.tobytes()
+
+            header = Header()
+            header.stamp = stamp if stamp is not None else rospy.Time.now()
+            header.frame_id = frame_id
+
+            msg = PointCloud2(
+                header=header,
+                height=1,
+                width=n,
+                is_dense=False,
+                is_bigendian=False,
+                fields=fields,
+                point_step=point_step,
+                row_step=point_step * n,
+                data=data,
+            )
+            return msg
+
+
+        # --- Processor class ---
+
+        class RosPointCloudPublisher:  # If you have a base like PointCloudMatProcessor, inherit from it instead.
+            """
+            Publishes point clouds to ROS Noetic as sensor_msgs/PointCloud2.
+
+            Parameters
+            ----------
+            topic : str
+                ROS topic to publish to.
+            frame_id : str
+                TF frame id set in PointCloud2.header.frame_id.
+            queue_size : int
+                rospy.Publisher queue size.
+            latch : bool
+                Latch last message (useful for static/slow clouds).
+            publish_rate_hz : Optional[float]
+                If provided and you call `spin()`, it will loop at this rate.
+                If you call `publish()` directly, this is not used.
+            """
+            def __init__(self,
+                        topic: str = "/points",
+                        frame_id: str = "map",
+                        queue_size: int = 10,
+                        latch: bool = False,
+                        publish_rate_hz: Optional[float] = None):
+                self.topic = topic
+                self.frame_id = frame_id
+                self.queue_size = queue_size
+                self.latch = latch
+                self.publish_rate_hz = publish_rate_hz
+                self._pub = None
+
+            def build(self, node_name: str = "pcd_publisher", anonymous: bool = True):
+                """Initialize ROS (if needed) and create the Publisher."""
+                if not rospy.core.is_initialized():
+                    rospy.init_node(node_name, anonymous=anonymous, disable_signals=True)
+                self._pub = rospy.Publisher(self.topic, PointCloud2,
+                                            queue_size=self.queue_size, latch=self.latch)
+                # Give ROS a tick so the connection can establish
+                rospy.sleep(0.05)
+
+            def publish(self,
+                        pcd: np.ndarray,
+                        *,
+                        rgb: Optional[np.ndarray] = None,
+                        intensity: Optional[np.ndarray] = None,
+                        stamp: Optional[rospy.Time] = None,
+                        frame_id: Optional[str] = None):
+                """Convert and publish a single cloud."""
+                if self._pub is None:
+                    self.build()
+                msg = numpy_to_pointcloud2(
+                    pcd,
+                    frame_id=frame_id or self.frame_id,
+                    stamp=stamp,
+                    rgb=rgb,
+                    intensity=intensity
+                )
+                self._pub.publish(msg)
+
+            # Optional helper if you want a loop-style publisher
+            def spin(self, clouds_iterable):
+                """
+                Iterate over an iterable of dicts like:
+                    {"pcd": np.ndarray, "rgb": np.ndarray (optional), "intensity": np.ndarray (optional)}
+                and publish them at publish_rate_hz.
+                """
+                if self._pub is None:
+                    self.build()
+                rate = rospy.Rate(self.publish_rate_hz if self.publish_rate_hz else 10.0)
+                for item in clouds_iterable:
+                    if rospy.is_shutdown():
+                        break
+                self.publish(item["pcd"],
+                            rgb=item.get("rgb"),
+                            intensity=item.get("intensity"))
+                rate.sleep()
+    except ImportError:
+        print("ROS is not available. Cannot use RosPointCloudPublisher.")
+
 class PointCloudMatProcessors(BaseModel):
     @staticmethod    
     def dumps(pipes:list[PointCloudMatProcessor]):
