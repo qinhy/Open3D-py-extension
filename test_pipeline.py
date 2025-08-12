@@ -5,8 +5,7 @@ from typing import List, Union
 import cv2
 import numpy as np
 import torch
-import torchvision.transforms as T
-from image_pipeblocks.image_pipeblocks.ImageMat import ColorType, ImageMat, ImageMatInfo, ShapeType
+from image_pipeblocks.image_pipeblocks.ImageMat import ColorType, ImageMat, ImageMatInfo
 from image_pipeblocks.image_pipeblocks.processors import Processors as ImgProcessors
 import open3dpypro as pro3d
 from open3dpypro.PointCloudMat import MatOps, PointCloudMat, PointCloudMatInfo
@@ -378,7 +377,6 @@ def test1(sources,loop=False):
         return res
     binimg_cls._forward_raw=cleanandfit
 
-
     ld_back2Pcd = pro3d.processors.Processors.Lambda()
     def back2Pcd(pcds_data, pcds_info, meta):
         res = []
@@ -396,92 +394,84 @@ def test1(sources,loop=False):
                 T = np.linalg.inv(np.array(zi.forward_T[0], dtype=np.float32))
                 transformed_points = points_homogeneous @ T.T
                 res.append(transformed_points[:, :3])  # Keep only XYZ coordinates
+
+        # to raw pcd coordinates
+        T = np.array(meta.get('Lambda:ld_centerz', None).forward_T[0], dtype=np.float32)
+        T = np.array(meta.get('PlaneNormalize:pn', None).forward_T[0], dtype=np.float32) @ T
+        T = np.linalg.inv(T)
+        for i, pcd in enumerate(res):
+            pcd_hom = np.stack([pcd[:, 0], pcd[:, 1], pcd[:, 2],
+                                np.ones(pcd.shape[0], dtype=np.float32)],
+                                axis=1)  # (N, 4)
+            transformed = pcd_hom @ T.T  # (N, 4)
+            res[i] = transformed[:, :3]  # Keep only XYZ coordinates
+
         res += pcds_data
         return res
     ld_back2Pcd._forward_raw=back2Pcd
-
 
     n_samples=50_000
     voxel_size=0.01
     radius=2.0
 
-    gen = pro3d.generator.NumpyRawFrameFileGenerator(sources=sources,loop=loop,
-                            shape_types=[pro3d.ShapeType.XYZ])    
+    gen = pro3d.generator.NumpyRawFrameFileGenerator(
+                            sources=sources,loop=loop,shape_types=[pro3d.ShapeType.XYZ])    
     plane_det = pro3d.processors.Processors.PlaneDetection(distance_threshold=voxel_size*2,alpha=0.1)
 
-    pip_gpu_pcd_filters = [
-        pro3d.processors.Processors.RandomSample(n_samples=n_samples),
 
-        pro3d.processors.Processors.NumpyToTorch(),        
+    # for testing purposes, we can use a fixed plane
+    depth_cv_view      = ImgProcessors.CvImageViewer(title='depth',scale=2.0)
+    segdepth_cv_view   = ImgProcessors.CvImageViewer(title='segdepth',scale=2.0)
+
+    mergepcd = pro3d.processors.Processors.MergePCDs()
+    pcdviewer = pro3d.processors.Processors.O3DStreamViewer()
+
+    pipes = [
+        pro3d.processors.Processors.RandomSample(n_samples=n_samples),
+        pro3d.processors.Processors.BackUp(uuid="Backup:rawpcd",device='cpu'),
+
         #### GPU
+        pro3d.processors.Processors.NumpyToTorch(),
         pro3d.processors.Processors.RadiusSelection(radius=radius),
         pro3d.processors.Processors.VoxelDownsample(voxel_size=voxel_size),
         plane_det,
         pro3d.processors.Processors.PlaneNormalize(uuid="PlaneNormalize:pn",
                                 detection_uuid=plane_det.uuid,save_results_to_meta=True),
         ld_centerz,
-        ld_filter50cm,            
+        ld_filter50cm,
         ld_direction,
-    ]
+        pro3d.processors.Processors.BackUp(uuid="Backup:normpcd",device='cpu'),
 
-    pip_gpu_zdepth = [
         ZDepthImage(uuid="ZDepthImage:zi",grid_size=-1,save_results_to_meta=True),
         ImgProcessors.TorchResize(target_size=(224, 224)),
-    ]
+        ImgProcessors.BackUp(uuid="BackUp:depth",device='cpu'),
 
-    pip_gpu_seg = [
         ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=183-step=58144.ckpt',
                 #'./tmp/epoch=2-step=948.ckpt',#'./tmp/epoch=183-step=58144.ckpt',epoch=92-step=36735.ckpt
                 device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
-        ImgProcessors.CvImageViewer(title='segdepth',scale=2.0),
+        #### GPU end
+
         binimg_cls,
+        ImgProcessors.BackUp(uuid="BackUp:segdepth",device='cpu'),
     ]
 
-    pipe_vis_depth = [
-        ImgProcessors.TorchGrayToNumpyGray(),
-        ImgProcessors.CvImageViewer(title='depth',scale=2.0),
-    ]
-    
-    pipe_vis_segdepth = [
-        ImgProcessors.CvImageViewer(title='finallines',scale=2.0),
-    ]
-
-    pipe_post_pcd = [
-        pro3d.processors.Processors.TorchToNumpy(),
-        ld_back2Pcd,
-        pro3d.processors.Processors.MergePCDs(),
-        pro3d.processors.Processors.O3DStreamViewer(),
-    ]
-    
-    pipes=[pip_gpu_pcd_filters, pip_gpu_zdepth, pipe_vis_depth, pipe_vis_segdepth, pip_gpu_seg, pipe_post_pcd]
-    def run_once(imgs,meta={},
-            pipes=pipes,
-            validate=False):
-        pip_gpu_pcd_filters, pip_gpu_zdepth, pipe_vis_depth,  pipe_vis_segdepth, pip_gpu_seg, pipe_post_pcd = pipes
+    def run_once(imgs,meta={},pipes=pipes,validate=False):
         try:
-            for fn in pip_gpu_pcd_filters:
+            for fn in pipes:
                 imgs,meta = (fn.validate if validate else fn)(imgs,meta)
+            pcds = meta.get('Backup:rawpcd', None).get_backup_mats()
+            pcds,meta = (ld_back2Pcd.validate if validate else ld_back2Pcd)(pcds,meta)
+
+          
+            pcds,meta = (mergepcd.validate if validate else mergepcd)(pcds,meta)
+            pcds,meta = (pcdviewer.validate if validate else pcdviewer)(pcds,meta)
+            imgs = meta.get('BackUp:depth', None).get_backup_mats()
+            imgs,meta = (depth_cv_view.validate if validate else depth_cv_view)(imgs,meta)
+            imgs = meta.get('BackUp:segdepth', None).get_backup_mats()
+            imgs,meta = (segdepth_cv_view.validate if validate else segdepth_cv_view)(imgs,meta)
             
-            pcds = [i.copy() for i in imgs]
 
-            for fn in pip_gpu_zdepth:
-                imgs,meta = (fn.validate if validate else fn)(imgs,meta)            
-            
-            segimgs = [i.copy() for i in imgs]
-            for fn in pip_gpu_seg:
-                segimgs,meta = (fn.validate if validate else fn)(segimgs,meta)
-
-            for fn in pipe_vis_depth:
-                imgs,meta = (fn.validate if validate else fn)(imgs,meta)
-                
-            for fn in pipe_vis_segdepth:
-                segimgs,meta = (fn.validate if validate else fn)(segimgs,meta)
-
-            for fn in pipe_post_pcd:
-                print(f"Processing {fn.uuid} with {len(pcds)} point clouds")
-                pcds,meta = (fn.validate if validate else fn)(pcds,meta)
-                print(f"Processing {fn.uuid} with {len(pcds)} out point clouds")
         except Exception as e:
             print(f"Error in processing {fn.uuid}: {e}")
             raise e
@@ -493,16 +483,14 @@ def test1(sources,loop=False):
 
     while len(pipes)>0:
         measure_fps(gen, func=lambda imgs:run_once(imgs,{},pipes),
-                test_duration=200,
-                title=f"#### profile ####\n{'  ->  '.join([f.title for ff in pipes for f in ff])}")
+                test_duration=20,
+                title=f"#### profile ####\n{'  ->  '.join([f.title for f in pipes])}")
         return
-        pipes.pop()
-
-
+    
 
 if __name__ == "__main__":
     for s in [
-            #    ['../zed_point_clouds.npy'],
+               ['../zed_point_clouds.npy'],
             #    ['./data/bunny.npy'],
                ['../2025-06-12_12-10-25.white.top.right.Csv.npy'],
                ['../2025-06-12_12-10-25.white.top.center.Csv.npy'],

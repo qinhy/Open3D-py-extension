@@ -51,11 +51,41 @@ class Processors:
         def forward_raw(self, pcds_data: List[np.ndarray], pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[np.ndarray]:
             return pcds_data
         
+    class BackUp(PointCloudMatProcessor):
+        title: str = 'output_backup'
+        device: str = ''
+        save_results_to_meta: bool = True
+        _backup_mats: List[PointCloudMat] = []
+
+        def validate_pcd(self, idx, pcd):
+            self.init_common_utility_methods(idx,pcd.is_ndarray())
+
+        def get_backup_mats(self) -> List[PointCloudMat]:
+            backup_mats = [
+                PointCloudMat(shape_type=inpcd.info.shape_type).build(pcd)
+                for pcd,inpcd in zip(self._backup_mats, self.input_mats)
+            ]
+            return backup_mats
+
+        def forward_raw(
+            self,
+            pcds_data: List[np.ndarray|torch.Tensor],
+            pcds_info: Optional[List[PointCloudMatInfo]] = None,
+            meta: Optional[dict] = None
+        ) -> List[np.ndarray|torch.Tensor]:
+            self._backup_mats = []
+            for i,pcd in enumerate(pcds_data):
+                pcd = self._mat_funcs[i].copy_mat(pcd)
+                if self.device == 'cpu':
+                    pcd = self._mat_funcs[i].to_numpy(pcd)
+                self._backup_mats.append(pcd)
+            return pcds_data
+        
     class NumpyToTorch(PointCloudMatProcessor):
         title: str = 'numpy_to_torch'
 
         def model_post_init(self, context):
-            self.devices_info(gpu=True, multi_gpu=-1)            
+            self.devices_info(gpu=True, multi_gpu=-1)
             return super().model_post_init(context)
         
         def validate_pcd(self, pcd_idx, pcd: PointCloudMat):

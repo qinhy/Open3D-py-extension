@@ -461,10 +461,35 @@ class PointCloudMatProcessor(BaseModel):
         return self.input_mats
 
     def build_out_mats(self, validated_pcds: List[PointCloudMat], converted_raw_pcds):
-        self.out_mats = [
-            PointCloudMat(shape_type=old.info.shape_type).build(pcd)
-            for old, pcd in zip(validated_pcds, converted_raw_pcds)
-        ]
+        if len(validated_pcds) == len(converted_raw_pcds):
+            # 1 to 1
+            self.out_mats = [
+                PointCloudMat(shape_type=old.info.shape_type).build(pcd)
+                for old, pcd in zip(validated_pcds, converted_raw_pcds)
+            ]
+        elif len(validated_pcds) == 1 and len(converted_raw_pcds) > 1:
+            # 1 to many
+            self.out_mats = [
+                PointCloudMat(shape_type=validated_pcds[0].info.shape_type).build(pcd)
+                for pcd in converted_raw_pcds
+            ]
+        elif len(validated_pcds) > 1 and len(converted_raw_pcds) == 1:
+            # many to 1
+            shape_type = [validated_pcds[i].info.shape_type for i in range(len(validated_pcds))]
+            shape_type = set(shape_type)
+            if len(shape_type) > 1:
+                raise ValueError(
+                    f"Shape type mismatch: {shape_type}. All PointCloudMats must have the same shape type."
+                )
+            shape_type = shape_type.pop()
+            self.out_mats = [
+                PointCloudMat(shape_type=shape_type).build(pcd)
+                for pcd in converted_raw_pcds
+            ]
+        else:
+            raise ValueError(
+                f"Length mismatch: {len(validated_pcds)} vs {len(converted_raw_pcds)}"
+            )
         return self.out_mats
 
     def forward_raw(self, pcds: List[Any], pcd_infos: List[PointCloudMatInfo] = [], meta={}) -> List[Any]:
