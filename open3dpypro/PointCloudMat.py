@@ -278,7 +278,7 @@ class MatOps:
     def hstack(self, arrays): raise NotImplementedError()
     def norm(self, x): raise NotImplementedError()
     def dot(self, a, b): raise NotImplementedError()
-    def cross(self, a, b): raise NotImplementedError()
+    def cross(self, a, b, dim=-1): raise NotImplementedError()
     def matmul(self, a, b): raise NotImplementedError()
     def to_numpy(self, x)->np.ndarray: raise NotImplementedError()
     def mean(self, x, dim=0): raise NotImplementedError()
@@ -312,7 +312,7 @@ class NumpyMatOps(MatOps):
     def hstack(self, arrays): return np.hstack(arrays)
     def norm(self, x): return np.linalg.norm(x)
     def dot(self, a, b): return np.dot(a, b)
-    def cross(self, a, b): return np.cross(a, b)
+    def cross(self, a, b, dim=-1): return np.cross(a, b, axis=dim)
     def matmul(self, a, b): return a @ b
     def to_numpy(self, x)->np.ndarray: return x
     def mean(self, x, dim=0): return np.mean(x, axis=dim)
@@ -347,7 +347,7 @@ class TorchMatOps(MatOps):
     def hstack(self, arrays): return torch.cat(arrays, dim=1)
     def norm(self, x): return torch.norm(x)
     def dot(self, a, b): return torch.dot(a, b)
-    def cross(self, a, b): return torch.cross(a, b)
+    def cross(self, a, b, dim=-1): return torch.cross(a, b, dim=dim)
     def matmul(self, a, b): return torch.matmul(a, b)
     def to_numpy(self, x)->np.ndarray: return x.detach().cpu().numpy()
     def mean(self, x, dim=0): return torch.mean(x, dim=dim)

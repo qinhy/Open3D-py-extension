@@ -163,6 +163,7 @@ try:
         sources: List[str]  -> ROS topic names (e.g. "/lidar/points")
         shape_types: List[ShapeType] -> one per source (same as your base)
         """
+        sources: List[str] = ["/lidar/points"]
         queue_size: int = 4
         ros_node_name: str = "RosPointCloud2Generator"
 
@@ -175,21 +176,21 @@ try:
             # init_node can only be called once per process; guard it
             if not rospy.core.is_initialized():
                 # disable_signals=True so it plays nice inside libraries/subprocesses
-                rospy.init_node(f"{self.ros_node_name}_{self.uuid.replace(':','_')}",
+                rospy.init_node(f"{self.ros_node_name}_{self.uuid.replace(':','_').replace('-','_')}",
                                 anonymous=True, disable_signals=True)
 
         def _msg_to_numpy(self, msg: PointCloud2) -> np.ndarray:
-            """
-            Convert PointCloud2 -> (N,3) float32 array [x,y,z], drop NaNs.
-            """
-            # Fast path: read x,y,z; skip NaNs at source
+            # generator yields (x, y, z) tuples
             gen = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
-            # np.fromiter is ~2x faster than np.array(list(...)) for large clouds
-            arr = np.fromiter(gen, dtype=np.float32, count=-1)
+
+            # tell NumPy each item has 3 float32 fields
+            dt = np.dtype([("x", np.float32), ("y", np.float32), ("z", np.float32)])
+            a = np.fromiter(gen, dtype=dt)               # structured shape: (N,)
+            arr = a.view(np.float32).reshape(-1, 3)      # plain (N,3) float32 view
+
+            # empty-safe + contiguous
             if arr.size == 0:
                 return np.empty((0, 3), dtype=np.float32)
-            arr = arr.reshape((-1, 3))
-            # Ensure contiguous (your code calls np.ascontiguousarray downstream)
             return np.ascontiguousarray(arr)
 
         def create_frame_generator(self, idx, source) -> Iterator[np.ndarray]:

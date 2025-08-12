@@ -34,6 +34,14 @@ from typing import List
 # import pycuda.driver as cuda
 # import pycuda.autoinit
 
+try:
+    import rospy
+    from std_msgs.msg import Header
+    from sensor_msgs.msg import PointField, PointCloud2
+    import sensor_msgs.point_cloud2 as pc2
+except ImportError:
+        print("ROS is not available. Cannot use RosPointCloudPublisher.")
+
 # ===============================
 # Custom Modules
 # ===============================
