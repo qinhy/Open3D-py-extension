@@ -732,7 +732,7 @@ class Processors:
 
         def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], pcds_info: list = [], meta: dict = {}) -> List[Union[np.ndarray, torch.Tensor]]:
             models = meta[self.detection_uuid]
-            self.forward_T = {}
+            self.forward_T = [i for i in range(len(pcds_data))]
             res = []
 
             for i, pcd in enumerate(pcds_data):
