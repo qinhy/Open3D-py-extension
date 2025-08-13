@@ -35,7 +35,6 @@ def measure_fps(gen, test_duration=15, func = lambda imgs:None,
     # Compute average FPS
     print(f"Test completed: Average FPS = {(frame_count/(time.time()-start_time)):.2f}")
 
-
 class ZDepthImage(pro3d.processors.Processors.Lambda):    
     title: str = 'z_depth_img'
     grid_size:int=-1
@@ -66,28 +65,7 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
             for old, pcd in zip(validated_pcds, converted_raw_pcds)
         ]
         return self.out_mats
-    
-    # # --------------------------------------------------------------------- #
-    # def imgBackToPCD(
-    #     self,
-    #     idx: int,
-    #     img: Union[np.ndarray, torch.Tensor],
-    #     funcs: MatOps,
-    # ) -> np.ndarray:
-    #     # Get the indices where the matrix is not zero
-    #     y_indices, x_indices = funcs.nonzero(img) # (mat != 0).nonzero(as_tuple=True)
-    #     # Get the corresponding pixel values
-    #     values = img[y_indices, x_indices]
-    #     # Combine x, y, and value
-    #     pcd_r = funcs.stack((x_indices, y_indices, values),dim=1)
-    #     # Convert to homogeneous coordinates
-    #     pcd_r = funcs.stack((pcd_r, funcs.ones(pcd_r.shape[0], dtype=funcs.float32)), dim=1)
-    #     # Apply the inverse transformation 
-    #     T = funcs.mat(self.forward_T[idx], dtype=funcs.float32)
-    #     pcd_r = pcd_r @ T.inverse().T  # (N, 4)
-    #     # Convert back to 3D coordinates
-    #     return pcd_r[:, :3]
-    
+        
     @staticmethod
     def compute_4x4_homogeneous_transform(x_min, x_max, y_min, y_max, z_min, z_max, grid_size):
         # Scale and bias for each axis
@@ -132,18 +110,18 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
         # Use XYZ coordinates only
         xyz = pcd[:, :3]
         # Extract Z (depth) channel
-        x = self._mat_funcs[0].copy_mat(xyz[:, 0])
-        y = self._mat_funcs[0].copy_mat(xyz[:, 1])
-        z = self._mat_funcs[0].copy_mat(xyz[:, 2])
+        x = funcs.copy_mat(xyz[:, 0])
+        y = funcs.copy_mat(xyz[:, 1])
+        z = funcs.copy_mat(xyz[:, 2])
 
         # Normalize x and y to [0, 1]
-        self.x_min = x_min = x.min() if self.x_min==self.inf else self.x_min
-        self.x_max = x_max = x.max() if self.x_max==self.inf else self.x_max
-        self.y_min = y_min = y.min() if self.y_min==self.inf else self.y_min
-        self.y_max = y_max = y.max() if self.y_max==self.inf else self.y_max
-        self.z_min = z_min = z.min() if self.z_min==self.inf else self.z_min
-        self.z_max = z_max = z.max() if self.z_max==self.inf else self.z_max
-        self.z_mean = z_mean = float(z.mean()) if self.z_mean==self.inf else self.z_mean
+        self.x_min = x_min = float(x.min()) #if self.x_min==self.inf else self.x_min
+        self.x_max = x_max = float(x.max()) #if self.x_max==self.inf else self.x_max
+        self.y_min = y_min = float(y.min()) #if self.y_min==self.inf else self.y_min
+        self.y_max = y_max = float(y.max()) #if self.y_max==self.inf else self.y_max
+        self.z_min = z_min = float(z.min()) #if self.z_min==self.inf else self.z_min
+        self.z_max = z_max = float(z.max()) #if self.z_max==self.inf else self.z_max
+        self.z_mean = z_mean = float(z.mean()) #if self.z_mean==self.inf else self.z_mean
         # xy_min, xy_max = min(x_min,y_min), max(x_max,y_max)
 
         if not (x_max - x_min < 1e-5 or y_max - y_min < 1e-5 or z_max - z_min < 1e-5):            
@@ -227,7 +205,6 @@ def filter_inline_points(centerline_points, distance_thresh=2.0):
             filtered_points[lbl][direction] = inliers
 
     return filtered_points
-
 
 def test1(sources,loop=False):
 
