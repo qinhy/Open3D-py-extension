@@ -957,6 +957,10 @@ class Processors:
             return super().release()
 
     try:
+        import rospy
+        from std_msgs.msg import Header
+        from sensor_msgs.msg import PointField, PointCloud2
+        import sensor_msgs.point_cloud2 as pc2
         class RosPointCloudPublisher(PointCloudMatProcessor):
             title: str = "ros_pcd_pub"
             topic: str = "/points"
