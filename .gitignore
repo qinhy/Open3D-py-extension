@@ -166,3 +166,4 @@ pcd_main.py
 ros_main.py
 pcd_main_cls.py
 *.avi
+field_ridges_detection.py
