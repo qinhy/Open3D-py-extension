@@ -507,6 +507,8 @@ class Processors:
         alpha:float = 0.0
         num_iterations:int = 512
         num_iteration_batch:int = 256
+        voxel_size:float=0.0
+        _vd:'Processors.VoxelDownsample'=None
         _models:list = []
 
         def ransac_plane_detection_torch(self,
@@ -664,6 +666,8 @@ class Processors:
                 
         def model_post_init(self, context):
             self.build()
+            if self.voxel_size>0.0:
+                self._vd =Processors.VoxelDownsample(voxel_size=self.voxel_size)
             return super().model_post_init(context)
 
         def validate_pcd(self, pcd_idx, pcd:PointCloudMat):
@@ -675,9 +679,18 @@ class Processors:
                 self.devices_info()
                 self.build()
             self.best_planes.append([0.,0.,0.,0.])
+        
+        def validate(self, pcds, meta = ..., run=True):            
+            if self._vd:
+                self._vd.validate(pcds, meta, run)
+            return super().validate(pcds, meta, run)
 
         def forward_raw(self, pcds_data: List[Union[np.ndarray, torch.Tensor]], 
                         pcds_info: List[PointCloudMatInfo]=[], meta={}) -> List[Union[np.ndarray, torch.Tensor]]:
+        
+            if self._vd:
+                pcds_data = self._vd.forward_raw(pcds_data)
+                
             for i,pcd in enumerate(pcds_data):
                 model = self._models[i]
                 plane = model(pcd)
