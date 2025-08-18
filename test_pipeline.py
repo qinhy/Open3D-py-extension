@@ -142,7 +142,7 @@ class ZDepthImage(pro3d.processors.Processors.Lambda):
             # z_norm = (z_norm - z_norm.min()) / (z_norm.max() - z_norm.min())  # Normalize to [0, 1]
             z_img = funcs.zeros((grid_size, grid_size), dtype=funcs.float32, device=device)
             z_img[yi, xi] = z_norm
-            z_img[z_img == 0] = z_img[z_img > 0].mean()
+            # z_img[z_img == 0] = z_img[z_img > 0].mean()
             z_img = funcs.clip(z_img, 0, 1)  # Clip to [0, 1]
 
             if not is_torch:
@@ -423,7 +423,7 @@ def test1(sources,loop=False):
         ImgProcessors.TorchResize(target_size=(224, 224)),
         ImgProcessors.BackUp(uuid="BackUp:depth",device='cpu'),
 
-        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=9-step=3950.ckpt',
+        ImgProcessors.SegmentationModelsPytorch(ckpt_path='./tmp/epoch=756-step=299015.ckpt',
                 #'./tmp/epoch=2-step=948.ckpt',#'./tmp/epoch=183-step=58144.ckpt',epoch=92-step=36735.ckpt
                 device='cuda:0',encoder_name='timm-efficientnet-b8',encoder_weights='imagenet'),
         ImgProcessors.TorchGrayToNumpyGray(),
