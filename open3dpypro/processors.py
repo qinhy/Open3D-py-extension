@@ -968,7 +968,8 @@ class Processors:
         def release(self):
             self._vis.destroy_window()
             return super().release()
-
+        
+    RosPointCloudPublisher = None
     try:
         import rospy
         from std_msgs.msg import Header
