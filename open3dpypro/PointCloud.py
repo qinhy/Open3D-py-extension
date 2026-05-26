@@ -527,7 +527,16 @@ class PointCloudAdvanceIO(PointCloudUtility):
                 print(las)
                 lp = las.points
                 xyz = np.asarray([lp.x,lp.y,lp.z]).T
-                rgb = np.asarray([lp.red,lp.green,lp.blue]).T/(2.0**16) if rgb else []
+                rgb = np.asarray([lp.red,lp.green,lp.blue]).T if rgb else []
+
+                max_c = rgb.max()*1.0
+                if 2.0**8*0.9<max_c<2.0**8:
+                    rgb = rgb/2.0**8
+                elif 2.0**16*0.9<max_c<2.0**16:
+                    rgb = rgb/2.0**16
+                else:
+                    rgb = rgb/max_c
+
                 intensity = np.asarray(lp.intensity).reshape(-1,1) if intensity else []
                 labels = np.asarray(lp.raw_classification).reshape(-1,1) if labels else []
             return self.__class__(xyz=xyz,rgb=rgb,intensity=intensity,labels=labels)
@@ -962,7 +971,7 @@ class PointCloud(PointCloudAdvanceIO):
         while outlier_cloud.size()/raw_size>minPointsRatio:
             cnt+=1             
             try:
-                [a, b, c, d],inlines_idx = outlier_cloud.segment_plane(distance_threshold=thickness,ransac_n=ransac_n,num_iterations=num_iterations)
+                [a, b, c, d],inlines_idx = outlier_cloud.segment_plane(thickness=thickness,ransac_n=ransac_n,num_iterations=num_iterations)
             except Exception as e:
                 print(e)
                 break
